@@ -1,0 +1,16 @@
+{
+  "name": "pc98-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "build:wasm": "./native/build.sh",
+    "build": "pnpm build:wasm && pnpm -r build",
+    "test": "pnpm -r test",
+    "fixtures": "node scripts/fetch-fixtures.mjs"
+  },
+  "devDependencies": {
+    "bdf": "github:erkkah/BDF.js",
+    "typescript": "^5.9.0"
+  }
+}

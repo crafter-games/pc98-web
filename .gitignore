@@ -1,0 +1,27 @@
+node_modules/
+dist/
+native/out*/
+packages/core/wasm/
+fixtures/private/
+fixtures/public/cache/
+*.log
+.DS_Store
+
+# Disk images, ROMs and save states never go into git (see scripts/check-no-images.sh).
+*.fdi
+*.FDI
+*.d88
+*.D88
+*.d98
+*.hdm
+*.HDM
+*.hdi
+*.HDI
+*.nhd
+*.NHD
+*.thd
+*.xdf
+*.dup
+*.rom
+*.ROM
+*.np2

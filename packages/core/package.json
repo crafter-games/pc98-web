@@ -1,0 +1,22 @@
+{
+  "name": "@pc98-web/core",
+  "version": "0.1.0",
+  "description": "PC-9801 emulator core (Neko Project II in WebAssembly) for browsers and Node.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./wasm/*": "./wasm/*"
+  },
+  "files": ["dist", "wasm"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

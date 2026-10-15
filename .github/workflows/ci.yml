@@ -1,0 +1,28 @@
+name: CI
+on: [push, pull_request]
+
+env:
+  EM_VERSION: 6.0.12
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No disk images or ROMs in the repo
+        run: ./scripts/check-no-images.sh
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EM_VERSION }}
+          actions-cache-folder: emsdk-cache
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm fixtures
+      - run: pnpm --filter @pc98-web/web exec playwright install --with-deps chromium
+      - run: pnpm test
