@@ -25,3 +25,8 @@ fixtures/public/cache/
 *.rom
 *.ROM
 *.np2
+
+# Archives that may contain disk images
+*.rar
+*.lzh
+*.7z
