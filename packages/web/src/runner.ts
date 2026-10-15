@@ -3,6 +3,17 @@ import workletUrl from './pcm-worklet.js?url';
 
 /** Most frames run in one animation tick before we give up catching up. */
 const MAX_FRAMES_PER_TICK = 4;
+/**
+ * NP2 mixes quietly to leave headroom (FM music around -37 dBFS RMS), so the
+ * page adds makeup gain and a limiter that keeps peaks from clipping.
+ */
+const MAKEUP_GAIN = 3;
+/**
+ * Games poll the key matrix about once per frame, so a press and release that
+ * land between two frames would be missed. Releases are held back until a key
+ * has been down for at least this many frames.
+ */
+const MIN_HOLD_FRAMES = 3;
 /** Audio queued in the worklet beyond which we let the emulator idle a tick. */
 const AUDIO_HIGH_WATER_S = 0.15;
 
@@ -66,6 +77,8 @@ export class Runner {
   pause(): void {
     this.running = false;
     cancelAnimationFrame(this.raf);
+    this.keyQueue.length = 0;
+    this.downAt.clear();
     this.pc.releaseAllKeys();
     void this.audio?.suspend();
   }
@@ -79,7 +92,7 @@ export class Runner {
   /** 0..1 */
   setVolume(v: number): void {
     this.volume = v;
-    if (this.gain) this.gain.gain.value = v;
+    if (this.gain) this.gain.gain.value = v * MAKEUP_GAIN;
   }
 
   /** AudioContext must be created from a user gesture. */
@@ -90,8 +103,9 @@ export class Runner {
     const node = new AudioWorkletNode(audio, 'pcm-player', { outputChannelCount: [2] });
     node.port.onmessage = (e) => { this.audioQueued = e.data / this.pc.sampleRate; };
     const gain = audio.createGain();
-    gain.gain.value = this.volume;
-    node.connect(gain).connect(audio.destination);
+    gain.gain.value = this.volume * MAKEUP_GAIN;
+    const limiter = new DynamicsCompressorNode(audio, { threshold: -3, knee: 0, ratio: 20, attack: 0.003, release: 0.25 });
+    node.connect(gain).connect(limiter).connect(audio.destination);
     this.gain = gain;
     this.audio = audio;
     this.node = node;
@@ -110,6 +124,7 @@ export class Runner {
     }
     while (this.debtMs >= frameMs && frames < MAX_FRAMES_PER_TICK) {
       const before = this.pc.elapsedMs;
+      this.pumpKeys();
       if (!this.pc.runFrame(true)) break;
       this.debtMs -= this.pc.elapsedMs - before || frameMs;
       this.pumpAudio();
@@ -158,11 +173,15 @@ export class Runner {
       if (code === undefined || !this.running) return;
       e.preventDefault();
       if (down && e.repeat) return; // the PC-98 BIOS does its own typematic repeat
-      if (down) this.pc.keyDown(code); else this.pc.keyUp(code);
+      if (down) this.keyDown(code); else this.keyUp(code);
     };
     on(canvas, 'keydown', key(true));
     on(canvas, 'keyup', key(false));
-    on(canvas, 'blur', () => this.pc.releaseAllKeys());
+    on(canvas, 'blur', () => {
+      this.keyQueue.length = 0;
+      this.downAt.clear();
+      this.pc.releaseAllKeys();
+    });
 
     let buttons = { left: false, right: false };
     on(canvas, 'click', () => {
@@ -197,4 +216,40 @@ export class Runner {
   }
 
   private resumeOnVisible = false;
+  private readonly downAt = new Map<number, number>();
+  private readonly keyQueue: { code: number; down: boolean }[] = [];
+
+  /** Presses a PC-98 key from page input (keyboard, on-screen keys). */
+  keyDown(code: number): void {
+    this.keyQueue.push({ code, down: true });
+    this.pumpKeys();
+  }
+
+  /** Releases it, no sooner than MIN_HOLD_FRAMES after the press. */
+  keyUp(code: number): void {
+    this.keyQueue.push({ code, down: false });
+    this.pumpKeys();
+  }
+
+  /**
+   * Delivers queued key events in order. A release waits until its key has
+   * been down long enough, and everything behind it waits too, so a quick
+   * Shift+key still reaches the guest as Shift down, key, key up, Shift up.
+   */
+  private pumpKeys(): void {
+    const now = this.pc.frames;
+    while (this.keyQueue.length) {
+      const ev = this.keyQueue[0];
+      if (ev.down) {
+        this.downAt.set(ev.code, now);
+        this.pc.keyDown(ev.code);
+      } else {
+        const at = this.downAt.get(ev.code);
+        if (at !== undefined && now - at < MIN_HOLD_FRAMES) return;
+        this.downAt.delete(ev.code);
+        this.pc.keyUp(ev.code);
+      }
+      this.keyQueue.shift();
+    }
+  }
 }

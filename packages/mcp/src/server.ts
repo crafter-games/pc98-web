@@ -213,11 +213,12 @@ export function createServer(session: Session): McpServer {
 
   server.registerTool('insert_disk', {
     title: 'Insert disk',
-    description: 'Inserts a library image (name from list_disks) into a drive. Floppies can be swapped while running, which multi-disk games ask for. Hard disks take effect after a reset, which this tool performs.',
+    description: 'Inserts a library image (name from list_disks) into a drive. Floppies can be swapped while running, which multi-disk games ask for; 0.5 s then passes so the drive notices the new disk before you confirm in the game. Hard disks take effect after a reset, which this tool performs.',
     inputSchema: { drive: DRIVE, name: z.string().describe('Image name exactly as list_disks shows it.') },
   }, tool((a) => {
     const entry = session.insertDisk(a.drive as DriveId, a.name);
     if (entry.kind === 'hdd') session.machine.reset();
+    else session.machine.runFrames(secondsToFrames(0.5));
     return [text(`${entry.name} is in ${a.drive}${entry.hasSaves ? ' (with its saved writes)' : ''}${entry.kind === 'hdd' ? '; the machine was reset' : ''}.`)];
   }));
 

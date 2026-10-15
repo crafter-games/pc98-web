@@ -18,11 +18,11 @@ export function VirtualKeyboard({ runner }: { runner: Runner }) {
   const press = (code: number) => (e: PointerEvent) => {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    runner.pc.keyDown(code);
-    if (LOCKS.has(code)) setTimeout(() => runner.pc.keyUp(code), 80);
+    runner.keyDown(code);
+    if (LOCKS.has(code)) runner.keyUp(code);
   };
   const release = (code: number) => () => {
-    if (!LOCKS.has(code)) runner.pc.keyUp(code);
+    if (!LOCKS.has(code)) runner.keyUp(code);
   };
   return (
     <div class="vkbd" aria-label="Teclado PC-98">

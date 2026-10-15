@@ -5,7 +5,9 @@
  *
  * Cell layout: ANK characters store the code in the low byte with a zero high
  * byte. Kanji occupy two cells; the low byte holds (JIS row - 20h) and the high
- * byte the JIS column, and the right half repeats it with bit 7 set.
+ * byte the JIS column. The right half repeats the code with bit 7 set in one
+ * of the bytes (the BIOS sets it in the low byte, many games in the high byte)
+ * or, in some programs, unchanged. A valid left half never has bit 7 set.
  */
 
 #include "compiler.h"
@@ -77,8 +79,8 @@ const char *np2w_text_vram_utf8(int rows, int honor_secret) {
 			if (hi == 0) {
 				sjis[n++] = ank_to_sjis(lo);
 			}
-			else if (lo & 0x80) {
-				/* right half of a kanji already emitted */
+			else if ((lo | hi) & 0x80) {
+				/* right half of a kanji whose left half was emitted */
 				continue;
 			}
 			else {
@@ -93,7 +95,7 @@ const char *np2w_text_vram_utf8(int rows, int honor_secret) {
 				if (x + 1 < TEXT_COLS) {
 					UINT8 lo2 = mem[addr + 2];
 					UINT8 hi2 = mem[addr + 3];
-					if (hi2 == hi && (lo2 & 0x7f) == (lo & 0x7f)) {
+					if ((lo2 & 0x7f) == lo && (hi2 & 0x7f) == hi) {
 						x++;
 					}
 				}
