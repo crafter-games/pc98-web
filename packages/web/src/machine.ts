@@ -37,8 +37,10 @@ export class Machine {
   async boot(config?: Partial<MachineConfig>): Promise<void> {
     await this.flush();
     const settings = await this.storage.getSettings();
+    if (config) await this.storage.patchSettings({ config });
     this.pc = await PC98.create({
       config: config ?? settings.config,
+      bios: await this.storage.readRoms(),
       onDiskChange: (name) => this.markDirty(name),
     });
     for (const [slot, id] of this.mounted) await this.mountBytes(slot, id);
@@ -145,8 +147,25 @@ export class Machine {
 
   // ---- states
 
+  /** The disk the machine boots from: HDD 1 if present, else FDD 1. */
+  bootDiskId(): string | undefined {
+    return this.mounted.get('hdd0') ?? this.mounted.get('fdd0');
+  }
+
+  /** Gives the boot disk a library cover if it has none yet. */
+  async coverIfMissing(shot: () => Promise<Blob>): Promise<void> {
+    const id = this.bootDiskId();
+    if (!id) return;
+    const disk = await this.storage.getDisk(id);
+    if (disk && !disk.cover) {
+      await this.storage.setCover(id, await shot());
+      this.emit();
+    }
+  }
+
   async saveState(name: string, thumbnail?: Blob, id?: string): Promise<StateRecord> {
     await this.flush();
+    if (thumbnail) await this.coverIfMissing(async () => thumbnail);
     const rec = await this.storage.saveState(
       { id, name, disks: Object.fromEntries(this.mounted), config: this.pc.config, thumbnail },
       this.pc.saveState(),

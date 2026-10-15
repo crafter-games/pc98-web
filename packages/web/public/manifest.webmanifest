@@ -1,0 +1,22 @@
+{
+  "name": "PC-98 Web",
+  "short_name": "PC-98",
+  "description": "Emulador PC-9801 en tu navegador. Tus discos y partidas se quedan en tu equipo.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#141412",
+  "theme_color": "#141412",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": { "application/octet-stream": [".fdi", ".d88", ".hdm", ".hdi", ".nhd", ".xdf", ".nfd"] }
+    }
+  ]
+}

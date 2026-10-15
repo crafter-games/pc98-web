@@ -2,11 +2,15 @@ import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Runner } from './runner';
 import { Machine, SLOTS, type SlotId } from './machine';
-import { DISK_EXT, Storage, type DiskRecord, type StateRecord } from './storage';
+import { DEFAULT_DISPLAY, DISK_EXT, Storage, type DiskRecord, type DisplaySettings, type StateRecord } from './storage';
+import { Settings } from './components/Settings';
+import { VirtualKeyboard } from './components/VirtualKeyboard';
 import { exportBackup, importBackup } from './backup';
 import './style.css';
 
 const QUICK_SLOT = 'quick';
+/** Emulated time after which the boot disk gets an automatic library cover. */
+const COVER_AFTER_MS = 45_000;
 
 function formatSize(bytes: number): string {
   return bytes >= 1 << 20 ? `${(bytes / (1 << 20)).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
@@ -40,6 +44,11 @@ function App() {
   const [states, setStates] = useState<StateRecord[]>([]);
   const [toast, setToast] = useState<string>();
   const [error, setError] = useState<string>();
+  const [display, setDisplay] = useState<DisplaySettings>(DEFAULT_DISPLAY);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showKeyboard, setShowKeyboard] = useState(false);
+  const screenRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState<number>();
   const version = useMachineVersion(machine);
 
   const notify = (msg: string) => {
@@ -56,6 +65,8 @@ function App() {
       void Storage.requestPersistence();
       m = await Machine.create(storage);
       await m.restoreLastSession();
+      const settings = await storage.getSettings();
+      setDisplay({ ...DEFAULT_DISPLAY, ...settings.display });
       r = new Runner(m, canvasRef.current!);
       r.present();
       setMachine(m);
@@ -83,6 +94,47 @@ function App() {
     machine.storage.listDisks().then(setDisks);
     machine.storage.listStates().then(setStates);
   }, [machine, version]);
+
+  useEffect(() => {
+    runner?.setVolume(display.volume);
+  }, [runner, display.volume]);
+
+  const updateDisplay = (d: DisplaySettings) => {
+    setDisplay(d);
+    void machine?.storage.patchSettings({ display: d });
+  };
+
+  // Largest whole multiple of 640x480 (400 lines shown at 4:3) that fits.
+  useEffect(() => {
+    if (!display.integerScale) return setScale(undefined);
+    const el = screenRef.current?.parentElement;
+    if (!el) return;
+    const fit = () => {
+      const k = Math.max(1, Math.floor(Math.min(el.clientWidth / 640, (window.innerHeight - 160) / 480)));
+      setScale(k);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    window.addEventListener('resize', fit);
+    return () => { ro.disconnect(); window.removeEventListener('resize', fit); };
+  }, [display.integerScale, machine]);
+
+  // Give the boot disk a library cover once a game has been running for a while.
+  useEffect(() => {
+    if (!running || !machine || !runner) return;
+    const t = setInterval(() => {
+      if (machine.pc.elapsedMs > COVER_AFTER_MS) void machine.coverIfMissing(() => runner.thumbnail(320));
+    }, 5000);
+    return () => clearInterval(t);
+  }, [running, machine, runner]);
+
+  const fullscreen = () => {
+    const el = screenRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void el.requestFullscreen?.().then(() => canvasRef.current?.focus());
+  };
 
   const quickSave = guard(async () => {
     if (!machine || !runner) return;
@@ -118,6 +170,13 @@ function App() {
     notify(`${images.length} disco(s) añadidos a la biblioteca`);
   })();
 
+  useEffect(() => {
+    if (!machine || !('launchQueue' in window)) return;
+    (window as any).launchQueue.setConsumer(async (params: { files: FileSystemFileHandle[] }) => {
+      if (params.files?.length) addFiles(await Promise.all(params.files.map((h) => h.getFile())));
+    });
+  }, [machine]);
+
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     addFiles([...(e.dataTransfer?.files ?? [])]);
@@ -138,7 +197,12 @@ function App() {
         </span>
       </header>
 
-      <div class="screen">
+      <div
+        ref={screenRef}
+        class={`screen${display.crt ? ' crt' : ''}`}
+        style={scale ? { width: `${640 * scale}px` } : undefined}
+        onDblClick={fullscreen}
+      >
         <canvas ref={canvasRef} width={640} height={400} aria-label="Pantalla del PC-98" />
         {!running && (
           <button class="overlay" onClick={toggle} disabled={!runner}>
@@ -164,8 +228,22 @@ function App() {
           <button onClick={() => { runner?.pc.reset(); runner?.invalidate(); }} disabled={!runner}>Reset</button>
           <button onClick={quickSave} disabled={!runner} title="Ctrl+Shift+S">Guardar</button>
           <button onClick={quickLoad} disabled={!runner} title="Ctrl+Shift+L">Cargar</button>
+          <button class="secondary" onClick={() => setShowKeyboard(!showKeyboard)} aria-pressed={showKeyboard}>Teclas PC-98</button>
+          <button class="secondary" onClick={fullscreen} title="Doble clic en la pantalla">Pantalla completa</button>
+          <button class="secondary" onClick={() => setShowSettings(true)} disabled={!machine}>Ajustes</button>
         </div>
       </section>
+      {showKeyboard && runner && <VirtualKeyboard runner={runner} />}
+      {showSettings && machine && (
+        <Settings
+          machine={machine}
+          display={display}
+          onDisplay={updateDisplay}
+          onClose={() => setShowSettings(false)}
+          onApplied={() => { runner?.invalidate(); notify('Máquina reiniciada con los nuevos ajustes'); }}
+          guard={guard}
+        />
+      )}
 
       {machine && runner && (
         <div class="panels">
@@ -218,6 +296,7 @@ function Library(props: { machine: Machine; disks: DiskRecord[]; running: boolea
       <ul class="list">
         {disks.map((d) => (
           <li key={d.id}>
+            <Cover blob={d.cover} />
             <div class="grow">
               <strong>{d.name}</strong>
               <span class="meta">{d.kind.toUpperCase()} · {formatSize(d.bytes)}{d.hasSaves ? ' · con partidas guardadas' : ''}{inUse.has(d.id) ? ' · insertado' : ''}</span>
@@ -242,6 +321,12 @@ function Library(props: { machine: Machine; disks: DiskRecord[]; running: boolea
       </ul>
     </section>
   );
+}
+
+function Cover({ blob }: { blob?: Blob }) {
+  const url = useMemo(() => (blob ? URL.createObjectURL(blob) : undefined), [blob]);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  return url ? <img class="cover" src={url} alt="" width={64} height={48} /> : <div class="cover" />;
 }
 
 function Thumb({ blob }: { blob?: Blob }) {
@@ -311,6 +396,10 @@ function Backup(props: { machine: Machine; notify: (m: string) => void; guard: G
       }} />
     </section>
   );
+}
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  void navigator.serviceWorker.register('./sw.js');
 }
 
 render(<App />, document.getElementById('app')!);

@@ -16,6 +16,8 @@ export class Runner {
   private readonly ctx: CanvasRenderingContext2D;
   private audio?: AudioContext;
   private node?: AudioWorkletNode;
+  private gain?: GainNode;
+  private volume = 0.8;
   private audioQueued = 0;
   private raf = 0;
   private lastTick = 0;
@@ -74,6 +76,12 @@ export class Runner {
     void this.audio?.close();
   }
 
+  /** 0..1 */
+  setVolume(v: number): void {
+    this.volume = v;
+    if (this.gain) this.gain.gain.value = v;
+  }
+
   /** AudioContext must be created from a user gesture. */
   async enableAudio(): Promise<void> {
     if (this.audio) return;
@@ -81,7 +89,10 @@ export class Runner {
     await audio.audioWorklet.addModule(workletUrl);
     const node = new AudioWorkletNode(audio, 'pcm-player', { outputChannelCount: [2] });
     node.port.onmessage = (e) => { this.audioQueued = e.data / this.pc.sampleRate; };
-    node.connect(audio.destination);
+    const gain = audio.createGain();
+    gain.gain.value = this.volume;
+    node.connect(gain).connect(audio.destination);
+    this.gain = gain;
     this.audio = audio;
     this.node = node;
     if (!this.running) await audio.suspend();

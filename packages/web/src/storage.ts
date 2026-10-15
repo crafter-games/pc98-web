@@ -16,6 +16,8 @@ export interface DiskRecord {
   lastUsedAt?: number;
   /** The guest has written to it: a save overlay exists. */
   hasSaves: boolean;
+  /** Screenshot used as the library cover. */
+  cover?: Blob;
 }
 
 export interface StateRecord {
@@ -29,8 +31,24 @@ export interface StateRecord {
   thumbnail?: Blob;
 }
 
+export interface DisplaySettings {
+  /** Scale the 640x400 picture by whole multiples only. */
+  integerScale: boolean;
+  /** Scanline overlay. */
+  crt: boolean;
+  /** 0..1 */
+  volume: number;
+}
+
+export const DEFAULT_DISPLAY: DisplaySettings = { integerScale: false, crt: false, volume: 0.8 };
+
+/** Optional real ROM and sample files the user can provide. */
+export const ROM_FILES = ['bios.rom', 'font.rom', 'sound.rom', 'itf.rom', 'bios9821.rom', 'd8000.rom',
+  '2608_bd.wav', '2608_sd.wav', '2608_top.wav', '2608_hh.wav', '2608_tom.wav', '2608_rim.wav'] as const;
+
 export interface Settings {
   config?: Partial<MachineConfig>;
+  display?: Partial<DisplaySettings>;
   /** Drive slot -> disk id inserted in the last session. */
   lastDisks?: Record<string, string>;
 }
@@ -233,6 +251,10 @@ export class Storage {
     await this.patchDisk(id, { hasSaves: false });
   }
 
+  async setCover(id: string, cover: Blob): Promise<void> {
+    await this.patchDisk(id, { cover });
+  }
+
   async touchDisk(id: string): Promise<void> {
     await this.patchDisk(id, { lastUsedAt: Date.now() });
   }
@@ -278,6 +300,27 @@ export class Storage {
     await req(this.tx('states', 'readwrite').delete(id));
   }
 
+  // ---- ROMs
+
+  async listRoms(): Promise<string[]> {
+    return (await this.blobs.list('rom')).map((p) => p.slice(4)).filter((n) => (ROM_FILES as readonly string[]).includes(n));
+  }
+
+  async readRoms(): Promise<Record<string, Uint8Array>> {
+    const out: Record<string, Uint8Array> = {};
+    for (const name of await this.listRoms()) out[name] = (await this.blobs.get(`rom/${name}`))!;
+    return out;
+  }
+
+  async putRom(name: string, bytes: Uint8Array): Promise<void> {
+    if (!(ROM_FILES as readonly string[]).includes(name.toLowerCase())) throw new Error(`${name} is not a ROM file NP2 uses`);
+    await this.blobs.put(`rom/${name.toLowerCase()}`, bytes);
+  }
+
+  async deleteRom(name: string): Promise<void> {
+    await this.blobs.delete(`rom/${name}`);
+  }
+
   // ---- settings
 
   async getSettings(): Promise<Settings> {
@@ -292,11 +335,13 @@ export class Storage {
   // ---- backup
 
   /** Every record and blob, for export. */
-  async dump(): Promise<{ meta: { disks: DiskRecord[]; states: Omit<StateRecord, 'thumbnail'>[]; settings: Settings }; files: Record<string, Uint8Array> }> {
+  async dump(): Promise<{ meta: { disks: Omit<DiskRecord, 'cover'>[]; states: Omit<StateRecord, 'thumbnail'>[]; settings: Settings }; files: Record<string, Uint8Array> }> {
     const disks = await this.listDisks();
     const states = await this.listStates();
     const files: Record<string, Uint8Array> = {};
+    for (const name of await this.listRoms()) files[`rom/${name}`] = (await this.blobs.get(`rom/${name}`))!;
     for (const d of disks) {
+      if (d.cover) files[`covers/${d.id}.png`] = new Uint8Array(await d.cover.arrayBuffer());
       files[`disks/${d.id}`] = (await this.blobs.get(`disks/${d.id}`))!;
       const saves = await this.blobs.get(`saves/${d.id}`);
       if (saves) files[`saves/${d.id}`] = saves;
@@ -306,7 +351,7 @@ export class Storage {
       if (s.thumbnail) files[`thumbs/${s.id}.png`] = new Uint8Array(await s.thumbnail.arrayBuffer());
     }
     return {
-      meta: { disks, states: states.map(({ thumbnail: _t, ...s }) => s), settings: await this.getSettings() },
+      meta: { disks: disks.map(({ cover: _c, ...d }) => d), states: states.map(({ thumbnail: _t, ...s }) => s), settings: await this.getSettings() },
       files,
     };
   }
@@ -320,7 +365,11 @@ export class Storage {
       const saves = data.files[`saves/${d.id}`];
       if (saves) await this.blobs.put(`saves/${d.id}`, saves);
       else await this.blobs.delete(`saves/${d.id}`);
-      await req(this.tx('disks', 'readwrite').put({ ...d, hasSaves: !!saves }));
+      const cover = data.files[`covers/${d.id}.png`];
+      await req(this.tx('disks', 'readwrite').put({ ...d, hasSaves: !!saves, cover: cover ? new Blob([cover as Uint8Array<ArrayBuffer>], { type: 'image/png' }) : undefined }));
+    }
+    for (const [path, bytes] of Object.entries(data.files)) {
+      if (path.startsWith('rom/')) await this.blobs.put(path, bytes);
     }
     let states = 0;
     for (const s of data.meta.states) {

@@ -141,3 +141,36 @@ test('guest disk writes, mounted disks and quick saves survive a reload', { skip
   assert.deepEqual(other.errors, []);
   await fresh.close();
 });
+
+test('works offline, keeps hardware settings, and the virtual keyboard types', { skip, timeout: 180_000 }, async () => {
+  const context = await browser.newContext();
+  let { page, errors } = await open(context);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.setInputFiles('input[type=file][multiple]', IMAGE);
+
+  // Hardware settings persist and rebuild the machine.
+  await page.getByRole('button', { name: 'Ajustes' }).click();
+  await page.getByLabel('CPU').selectOption('i286');
+  await page.getByRole('button', { name: 'Aplicar y reiniciar' }).click();
+  await page.getByText('Máquina reiniciada').waitFor();
+  assert.equal(await page.evaluate(() => window.pc98.config.cpu), 'i286');
+
+  // Offline reload: everything comes from the service worker cache and OPFS.
+  await context.setOffline(true);
+  await page.close();
+  ({ page, errors } = await open(context));
+  assert.equal(await page.evaluate(() => window.pc98.config.cpu), 'i286');
+  await powerOn(page);
+
+  await page.getByRole('button', { name: 'Teclas PC-98' }).click();
+  for (const k of ['V', 'E', 'R']) {
+    await page.locator('canvas').press(`Key${k}`);
+  }
+  await page.locator('.vkbd button', { hasText: 'RETURN' }).dispatchEvent('pointerdown', { pointerId: 1 });
+  await page.waitForTimeout(150);
+  await page.locator('.vkbd button', { hasText: 'RETURN' }).dispatchEvent('pointerup', { pointerId: 1 });
+  await waitText(page, /A:\\>ver\s*\n\s*\nFreeCom ver/, 15_000);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/browser-m4.png`, fullPage: true });
+  assert.deepEqual(errors, []);
+  await context.close();
+});
