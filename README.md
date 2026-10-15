@@ -72,6 +72,12 @@ acts on the game you are watching, in real time, with that browser's library
 and states. The page shows when an agent is in control; `detach_browser` or the
 page's "Desconectar agente" button hands it back.
 
+Chrome asks the first time whether pc98.crafter.games may access devices on
+the local network: allow it, or the tab cannot reach `127.0.0.1`. The pairing
+message also includes a second link to a copy of the app served by
+`pc98-mcp` itself on the bridge port, which needs no permission but has its own
+(separate) browser storage.
+
 Tools: `screenshot`, `read_text`, `press_key`, `type_text`, `mouse`, `run`
 (for N seconds, `until_text`, or `until_stable_seconds`), `list_disks`,
 `insert_disk`, `eject_disk`, `discard_disk_saves`, `reset`, `power_on`,

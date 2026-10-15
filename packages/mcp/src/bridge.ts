@@ -1,5 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { createServer, type Server } from 'node:http';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { extname, join, resolve, sep } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { RemoteBackend } from './backends/remote.js';
 
@@ -8,8 +10,16 @@ const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 
 export const DEFAULT_ALLOWED_ORIGINS = ['https://pc98.crafter.games', 'http://localhost', 'http://127.0.0.1'];
 
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm',
+  '.bmp': 'image/bmp', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json',
+  '.json': 'application/json',
+};
+
 export interface BridgeOptions {
   port: number;
+  /** Built web app to serve on the bridge port, so a same-origin tab can attach without local-network prompts. */
+  appDir?: string;
   /** Origins allowed to attach. "http://localhost" matches any port. */
   allowedOrigins?: string[];
   /** Web app URL the pairing link points to. */
@@ -42,7 +52,7 @@ export class BrowserBridge {
 
   private async listen(): Promise<number> {
     if (this.http) return this.port;
-    const http = createServer((_req, res) => { res.writeHead(426).end('pc98-mcp bridge: WebSocket only'); });
+    const http = createServer((req, res) => this.serveApp(req, res));
     const wss = new WebSocketServer({ server: http, maxPayload: MAX_MESSAGE_BYTES });
     wss.on('connection', (ws, req) => this.accept(ws, req.headers.origin));
     await new Promise<void>((resolve, reject) => {
@@ -55,14 +65,38 @@ export class BrowserBridge {
     return this.port;
   }
 
-  /** Creates a fresh one-time token and returns the link that attaches a tab. */
-  async pair(): Promise<{ url: string; wsUrl: string; expiresInMinutes: number }> {
+  /** Static files of the web app, confined to appDir. */
+  private serveApp(req: IncomingMessage, res: ServerResponse) {
+    const root = this.opts.appDir;
+    if (!root || req.method !== 'GET') {
+      res.writeHead(404).end('pc98-mcp bridge');
+      return;
+    }
+    const path = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    let file = resolve(join(root, path));
+    if (file !== resolve(root) && !file.startsWith(resolve(root) + sep)) {
+      res.writeHead(403).end();
+      return;
+    }
+    if (!existsSync(file) || statSync(file).isDirectory()) file = join(root, 'index.html');
+    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(file));
+  }
+
+  /** Creates a fresh one-time token and returns the links that attach a tab. */
+  async pair(): Promise<{ url: string; localUrl?: string; wsUrl: string; expiresInMinutes: number }> {
     const port = await this.listen();
     const value = randomBytes(18);
     this.token = { value, expires: Date.now() + PAIRING_TTL_MS };
     const wsUrl = `ws://127.0.0.1:${port}/${value.toString('base64url')}`;
     const app = this.opts.appUrl ?? 'https://pc98.crafter.games/';
-    return { url: `${app}#agent=${encodeURIComponent(wsUrl)}`, wsUrl, expiresInMinutes: PAIRING_TTL_MS / 60_000 };
+    const hash = `#agent=${encodeURIComponent(wsUrl)}`;
+    return {
+      url: `${app}${hash}`,
+      localUrl: this.opts.appDir ? `http://127.0.0.1:${port}/${hash}` : undefined,
+      wsUrl,
+      expiresInMinutes: PAIRING_TTL_MS / 60_000,
+    };
   }
 
   private takeToken(presented: string): boolean {

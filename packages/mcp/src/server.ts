@@ -302,7 +302,17 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
       inputSchema: {},
     }, async () => {
       const p = await bridge.pair();
-      return { content: [text(`Ask the user to open this link in the browser where they play (it reuses their library and states there):\n${p.url}\n\nOr, in an open PC-98 Web tab, click "Conectar agente" and paste:\n${p.wsUrl}\n\nThe link works once and expires in ${p.expiresInMinutes} minutes. Only this computer can connect (127.0.0.1).`)] };
+      const lines = [
+        'Give the user one of these links (it works once and expires in ' + p.expiresInMinutes + ' minutes; only this computer can connect, via 127.0.0.1):',
+        '',
+        `1. Their usual PC-98 Web, with their disk library and states:\n${p.url}`,
+        '   Chrome asks to allow access to devices on the local network the first time: they must accept, or the tab cannot reach this server.',
+      ];
+      if (p.localUrl) {
+        lines.push('', `2. A copy served by this server (no permission prompt, but a separate, empty library there):\n${p.localUrl}`);
+      }
+      lines.push('', `Or, in an open PC-98 Web tab, click "Conectar agente" and paste:\n${p.wsUrl}`);
+      return { content: [text(lines.join('\n'))] };
     });
 
     server.registerTool('detach_browser', {

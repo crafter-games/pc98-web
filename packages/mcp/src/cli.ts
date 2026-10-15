@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createServer } from './server.js';
@@ -21,6 +23,9 @@ Usage: pc98-mcp [options]
 Browser attach (the pair_browser tool; nothing listens until it is called):
   --attach-port <n>   127.0.0.1 port for the tab bridge. Default 8098 (0 = any)
   --app-url <url>     Web app the pairing link opens. Default https://pc98.crafter.games/
+  --app-dir <dir>     Built web app to also serve on the bridge port (a same-origin
+                      fallback without local-network prompts). Default: the
+                      monorepo's packages/web/dist when it exists
   --allow-origin <o>  Extra origin allowed to attach (repeatable). Always allowed:
                       ${DEFAULT_ALLOWED_ORIGINS.join(', ')}
   --no-attach         Disable browser attach entirely
@@ -39,6 +44,7 @@ const { values } = parseArgs({
     epoch: { type: 'string' },
     'attach-port': { type: 'string' },
     'app-url': { type: 'string' },
+    'app-dir': { type: 'string' },
     'allow-origin': { type: 'string', multiple: true },
     'no-attach': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
@@ -60,9 +66,12 @@ for (const drive of ['fdd1', 'fdd2', 'hdd1'] as const) {
 session.machine.reset();
 if (values['load-state']) session.loadState(values['load-state']);
 
+const bundledApp = fileURLToPath(new URL('../../web/dist', import.meta.url));
+const appDir = values['app-dir'] ?? (existsSync(`${bundledApp}/index.html`) ? bundledApp : undefined);
 const bridge = values['no-attach'] ? undefined : new BrowserBridge({
   port: values['attach-port'] !== undefined ? Number(values['attach-port']) : 8098,
   appUrl: values['app-url'],
+  appDir,
   allowedOrigins: [...DEFAULT_ALLOWED_ORIGINS, ...(values['allow-origin'] ?? [])],
 });
 const server = createServer(session, bridge);

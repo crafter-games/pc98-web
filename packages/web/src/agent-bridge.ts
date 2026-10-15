@@ -56,7 +56,10 @@ export class AgentBridge {
     ws.onclose = (e) => {
       if (this.ws !== ws) return;
       this.ws = undefined;
-      this.onState?.('closed', e.reason || (e.code === 1006 ? 'no se pudo conectar (¿está pc98-mcp en marcha?)' : undefined));
+      const blocked = location.protocol === 'https:'
+        ? 'no se pudo conectar. Si el navegador preguntó por el acceso a la red local, permítelo y vuelve a pedir un enlace al agente (o usa el enlace local http://127.0.0.1 que te dio). Si no, comprueba que pc98-mcp sigue en marcha.'
+        : 'no se pudo conectar: ¿sigue en marcha pc98-mcp?';
+      this.onState?.('closed', e.reason || (e.code === 1006 ? blocked : undefined));
     };
   }
 
