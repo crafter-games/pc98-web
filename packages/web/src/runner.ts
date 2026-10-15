@@ -11,7 +11,7 @@ const AUDIO_HIGH_WATER_S = 0.15;
  * clock, blits the screen to a canvas and streams audio to an AudioWorklet.
  */
 export class Runner {
-  readonly pc: PC98;
+  private readonly source: { readonly pc: PC98 };
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private audio?: AudioContext;
@@ -24,14 +24,33 @@ export class Runner {
   private running = false;
   private readonly cleanup: (() => void)[] = [];
 
-  constructor(pc: PC98, canvas: HTMLCanvasElement) {
-    this.pc = pc;
+  /** Hotkeys handled by the page instead of the guest (combo -> action). */
+  hotkeys: Record<string, () => void> = {};
+
+  /** source.pc may be replaced (power cycle with new settings); the runner follows it. */
+  constructor(source: { readonly pc: PC98 }, canvas: HTMLCanvasElement) {
+    this.source = source;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false })!;
     this.bindInput();
   }
 
+  get pc(): PC98 { return this.source.pc; }
+
   get isRunning(): boolean { return this.running; }
+
+  /** Forces the next present() to redraw (after loading a state or swapping machines). */
+  invalidate(): void { this.lastVersion = -1; }
+
+  /** A small PNG of the current screen, for save state previews. */
+  async thumbnail(width = 160): Promise<Blob> {
+    const height = Math.round((width * 3) / 4);
+    const c = new OffscreenCanvas(width, height);
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(this.canvas, 0, 0, width, height);
+    return c.convertToBlob({ type: 'image/png' });
+  }
 
   start(): void {
     if (this.running) return;
@@ -117,6 +136,13 @@ export class Runner {
     canvas.tabIndex = 0;
 
     const key = (down: boolean) => (e: KeyboardEvent) => {
+      const combo = `${e.ctrlKey ? 'Ctrl+' : ''}${e.shiftKey ? 'Shift+' : ''}${e.code}`;
+      const hotkey = this.hotkeys[combo];
+      if (hotkey) {
+        e.preventDefault();
+        if (down && !e.repeat) hotkey();
+        return;
+      }
       const code = DOM_CODE_MAP[e.code];
       if (code === undefined || !this.running) return;
       e.preventDefault();

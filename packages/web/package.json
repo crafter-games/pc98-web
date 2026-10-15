@@ -12,10 +12,12 @@
   },
   "dependencies": {
     "@pc98-web/core": "workspace:*",
+    "fflate": "^0.8.3",
     "preact": "^11.0.1"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
+    "fake-indexeddb": "^6.2.5",
     "playwright": "^1.64.1",
     "typescript": "^5.9.3",
     "vite": "^8.3.4"

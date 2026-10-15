@@ -58,3 +58,33 @@ button {
 button:disabled { opacity: 0.5; cursor: default; }
 .hint { color: var(--muted); font-size: 13px; }
 .error { color: #c0392b; }
+header .store { margin-left: auto; color: var(--muted); font-size: 12px; }
+.controls .drive { cursor: default; }
+.drive select {
+  font: inherit; color: var(--fg); background: transparent; border: 0; padding: 0; margin: 0;
+  max-width: 100%; text-overflow: ellipsis; cursor: pointer;
+}
+.buttons { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 16px; }
+.panel { background: var(--panel); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.panel h2 { font-size: 15px; margin: 0 0 8px; display: flex; gap: 6px; align-items: baseline; }
+.panel h2 small { color: var(--muted); font-weight: normal; }
+button.secondary { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); padding: 6px 12px; }
+button.link { background: none; color: var(--accent); padding: 4px 6px; font-size: 13px; }
+button.link.danger { color: #c0392b; }
+.list { list-style: none; margin: 10px 0 0; padding: 0; }
+.list li { display: flex; align-items: center; gap: 4px; padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--muted) 25%, transparent); }
+.list .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.list strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { color: var(--muted); font-size: 12px; }
+.states { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.states li { display: flex; flex-direction: column; align-items: stretch; }
+button.state { background: none; color: var(--fg); padding: 0; text-align: left; display: flex; flex-direction: column; gap: 2px; }
+button.state img, .thumb-empty { width: 100%; height: auto; aspect-ratio: 4 / 3; border-radius: 4px; background: #000; image-rendering: pixelated; }
+button.state .name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.states .link { align-self: flex-start; padding-left: 0; }
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 6px; font-size: 14px;
+}
+.error { cursor: pointer; }

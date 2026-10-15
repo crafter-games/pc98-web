@@ -327,14 +327,20 @@ export class PC98 {
     return bytes;
   }
 
-  loadState(bytes: Uint8Array): void {
+  /**
+   * Restores a state. States reference disks by name rather than embedding
+   * them, so `diskChanged` is true when a mounted image differs from the one
+   * the state was saved with (it still loads).
+   */
+  loadState(bytes: Uint8Array): { diskChanged: boolean; warnings: boolean } {
     const path = '/np2/state.tmp';
     this.m.FS.writeFile(path, bytes);
     const ret: number = this.m.ccall('np2w_state_load', 'number', ['string'], [path]);
     this.m.FS.unlink(path);
-    if (ret !== 0) throw new Error(`Failed to load state (code ${ret})`);
+    if (ret < 0) throw new Error('Failed to load state: not a compatible NP2 state');
     this.queue.length = 0;
     this.powered = true;
+    return { diskChanged: (ret & 0x01) !== 0, warnings: (ret & 0x80) !== 0 };
   }
 
   // ---- memory

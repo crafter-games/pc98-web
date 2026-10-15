@@ -3,7 +3,9 @@
 A PC-9801 emulator for the browser, built on [Neko Project II](http://www.yui.ne.jp/np2/)
 compiled to WebAssembly, and designed to be driven by AI agents as well as people.
 
-- **Runs in the browser.** Disk images, saves and states stay on your machine.
+- **Runs in the browser** at https://pc98.crafter.games. Disk images, in-game
+  saves and save states stay in your browser (OPFS + IndexedDB), with zip
+  export/import for backups.
 - **Runs headless in Node.** The same WebAssembly core runs frame by frame,
   deterministic and faster than real time, for tests and agents.
 - **Agent-ready.** `pc98-mcp` is an MCP server that lets agents see the screen,
@@ -79,6 +81,15 @@ pc.runUntil((p) => /A:\\>/.test(p.textScreen()), 56 * 60);
 pc.typeText('dir\n');
 pc.runFrames(120);
 console.log(pc.textScreen());
+```
+
+## Deployment
+
+`Dockerfile` builds the WASM cores and the web app and serves them with nginx.
+It is deployed with Dokploy from `main`. After a deploy, check it with:
+
+```sh
+node packages/web/scripts/smoke.mjs https://pc98.crafter.games/
 ```
 
 ## Legal
