@@ -78,6 +78,7 @@ function App() {
       setRunner(r);
       (window as any).pc98 = m.pc;
       (window as any).pc98machine = m;
+      (window as any).pc98runner = r;
 
       const b = new AgentBridge(m, r);
       b.onState = (state, detail) => setAgent((a) => ({ ...a, state, detail }));

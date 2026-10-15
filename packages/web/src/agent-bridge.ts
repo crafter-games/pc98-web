@@ -56,6 +56,7 @@ export class AgentBridge {
     ws.onclose = (e) => {
       if (this.ws !== ws) return;
       this.ws = undefined;
+      this.runner.setKeepAliveInBackground(false);
       const blocked = location.protocol === 'https:'
         ? 'no se pudo conectar. Si el navegador preguntó por el acceso a la red local, permítelo y vuelve a pedir un enlace al agente (o usa el enlace local http://127.0.0.1 que te dio). Si no, comprueba que pc98-mcp sigue en marcha.'
         : 'no se pudo conectar: ¿sigue en marcha pc98-mcp?';
@@ -66,12 +67,14 @@ export class AgentBridge {
   close(): void {
     const ws = this.ws;
     this.ws = undefined;
+    this.runner.setKeepAliveInBackground(false);
     ws?.close(1000, 'closed by the user');
   }
 
   private async onMessage(data: string) {
     const msg = JSON.parse(data);
     if (msg.type === 'welcome') {
+      this.runner.setKeepAliveInBackground(true);
       this.onState?.('attached');
       return;
     }

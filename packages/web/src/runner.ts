@@ -35,6 +35,9 @@ export class Runner {
   private debtMs = 0;
   private lastVersion = -1;
   private running = false;
+  /** Keep emulating while the tab is hidden (an agent is attached). */
+  private keepAlive = false;
+  private ticker?: Worker;
   private readonly cleanup: (() => void)[] = [];
 
   /** Hotkeys handled by the page instead of the guest (combo -> action). */
@@ -78,16 +81,46 @@ export class Runner {
     this.lastTick = performance.now();
     this.debtMs = 0;
     void this.audio?.resume();
-    this.raf = requestAnimationFrame(this.tick);
+    this.schedule();
   }
 
   pause(): void {
     this.running = false;
     cancelAnimationFrame(this.raf);
+    this.stopTicker();
     this.keyQueue.length = 0;
     this.downAt.clear();
     this.pc.releaseAllKeys();
     void this.audio?.suspend();
+  }
+
+  /**
+   * While an agent is attached the machine must keep running when the tab is
+   * hidden, otherwise the agent's calls would hang; a person's game pauses.
+   */
+  setKeepAliveInBackground(on: boolean): void {
+    this.keepAlive = on;
+  }
+
+  get inBackground(): boolean { return !!this.ticker; }
+
+  /** Drives frames from requestAnimationFrame when visible, from a worker clock when hidden. */
+  private schedule(): void {
+    if (!this.running) return;
+    if (document.hidden) {
+      if (!this.ticker) {
+        this.ticker = new Worker(new URL('./ticker.worker.ts', import.meta.url), { type: 'module' });
+        this.ticker.onmessage = () => this.step(performance.now());
+      }
+    } else {
+      this.stopTicker();
+      this.raf = requestAnimationFrame(this.tick);
+    }
+  }
+
+  private stopTicker(): void {
+    this.ticker?.terminate();
+    this.ticker = undefined;
   }
 
   dispose(): void {
@@ -121,6 +154,13 @@ export class Runner {
 
   private tick = (now: number) => {
     if (!this.running) return;
+    this.step(now);
+    this.raf = requestAnimationFrame(this.tick);
+  };
+
+  /** Runs the frames owed since the last step and presents the result. */
+  private step(now: number): void {
+    if (!this.running) return;
     this.debtMs += Math.min(now - this.lastTick, 250);
     this.lastTick = now;
 
@@ -142,9 +182,8 @@ export class Runner {
       frames++;
     }
     if (frames === MAX_FRAMES_PER_TICK) this.debtMs = 0;
-    this.present();
-    this.raf = requestAnimationFrame(this.tick);
-  };
+    if (!document.hidden) this.present();
+  }
 
   private pumpAudio(): void {
     const pcm = this.pc.drainAudio();
@@ -212,7 +251,10 @@ export class Runner {
     on(canvas, 'mouseup', (e) => setButton(e, false));
 
     on(document, 'visibilitychange', () => {
-      if (document.hidden && this.running) {
+      if (this.running && this.keepAlive) {
+        cancelAnimationFrame(this.raf);
+        this.schedule(); // switch clock source, keep running
+      } else if (document.hidden && this.running) {
         this.pause();
         this.resumeOnVisible = true;
       } else if (!document.hidden && this.resumeOnVisible) {

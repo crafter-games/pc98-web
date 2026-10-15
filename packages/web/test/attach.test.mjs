@@ -78,6 +78,19 @@ test('an agent attaches to a browser tab and plays there in real time', { skip, 
     const ver = await call(client, 'type_text', { text: 'ver\n', wait_seconds: 1 });
     assert.match(ver.text, /A:\\>ver\s*\n\s*\nFreeCom ver/);
 
+    // Hidden tab: rAF stops in real browsers, so the runner must switch to its worker clock.
+    const setHidden = (hidden) => page.evaluate((h) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => h });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, hidden);
+    await setHidden(true);
+    assert.equal(await page.evaluate(() => window.pc98runner.inBackground), true);
+    const hiddenRun = await call(client, 'run', { seconds: 2, screenshot: false });
+    assert.match(hiddenRun.text, /ran for the full time after 2\.\d+s/);
+    await setHidden(false);
+    assert.equal(await page.evaluate(() => window.pc98runner.inBackground), false);
+
     await call(client, 'save_state', { name: 'from-agent' });
     await page.locator('.states .name', { hasText: 'from-agent' }).waitFor();
     assert.match((await call(client, 'list_states')).text, /from-agent .*fdd1=freedos98-2hd\.hdm/);
@@ -87,6 +100,11 @@ test('an agent attaches to a browser tab and plays there in real time', { skip, 
 
     await call(client, 'detach_browser');
     await page.getByText(/Un agente controla/).waitFor({ state: 'detached' });
+    // Without an agent, a hidden tab pauses the game as before.
+    await setHidden(true);
+    assert.equal(await page.evaluate(() => window.pc98runner.isRunning), false);
+    await setHidden(false);
+    assert.equal(await page.evaluate(() => window.pc98runner.isRunning), true);
     assert.match((await call(client, 'status')).text, /headless machine/);
     assert.deepEqual(errors, []);
   } finally {
