@@ -261,6 +261,7 @@ function App() {
           <button onClick={quickSave} disabled={!runner} title="Ctrl+Shift+S">Guardar</button>
           <button onClick={quickLoad} disabled={!runner} title="Ctrl+Shift+L">Cargar</button>
           <button class="secondary" onClick={() => setShowKeyboard(!showKeyboard)} aria-pressed={showKeyboard}>Teclas PC-98</button>
+          <button class="secondary" onClick={() => runner?.captureMouse()} disabled={!runner} title="Esc para soltarlo">Capturar ratón</button>
           <button class="secondary" onClick={fullscreen} title="Doble clic en la pantalla">Pantalla completa</button>
           <button class="secondary" onClick={() => setShowSettings(true)} disabled={!machine}>Ajustes</button>
           {agent.state === 'closed'

@@ -52,6 +52,13 @@ export class Runner {
 
   get isRunning(): boolean { return this.running; }
 
+  /** Locks the pointer to the screen so mouse motion goes to the PC-98 (Esc releases it). */
+  captureMouse(): void {
+    this.canvas.focus();
+    // Rejected when the page is not focused or locking is unsupported: the keyboard keeps working.
+    Promise.resolve(this.canvas.requestPointerLock?.()).catch(() => {});
+  }
+
   /** Forces the next present() to redraw (after loading a state or swapping machines). */
   invalidate(): void { this.lastVersion = -1; }
 
@@ -188,13 +195,9 @@ export class Runner {
     });
 
     let buttons = { left: false, right: false };
-    on(canvas, 'click', () => {
-      canvas.focus();
-      if (document.pointerLockElement !== canvas) {
-        // Rejected when the page is not focused or locking is unsupported: keep the keyboard working.
-        Promise.resolve(canvas.requestPointerLock?.()).catch(() => {});
-      }
-    });
+    // A click only focuses the screen; capturing the mouse is explicit
+    // (captureMouse) so keyboard-only games never trap the pointer.
+    on(canvas, 'click', () => canvas.focus());
     on(canvas, 'contextmenu', (e) => e.preventDefault());
     on(canvas, 'mousemove', (e) => {
       if (document.pointerLockElement === canvas) this.pc.mouseMove(e.movementX, e.movementY);
