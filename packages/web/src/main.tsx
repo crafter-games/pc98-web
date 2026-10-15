@@ -54,9 +54,11 @@ function App() {
   const [scale, setScale] = useState<number>();
   const version = useMachineVersion(machine);
 
+  const toastSeq = useRef(0);
   const notify = (msg: string) => {
+    const id = ++toastSeq.current;
     setToast(msg);
-    setTimeout(() => setToast((t) => (t === msg ? undefined : t)), 2500);
+    setTimeout(() => { if (toastSeq.current === id) setToast(undefined); }, 2500);
   };
   const guard = (fn: () => Promise<unknown>) => () => fn().catch((e) => setError(e instanceof Error ? e.message : String(e)));
 

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { preview } from 'vite';
-import { chromium } from 'playwright';
+import { launchBrowser } from './launch.mjs';
 
 const IMAGE = fileURLToPath(new URL('../../../fixtures/public/cache/freedos98-2hd.hdm', import.meta.url));
 const skip = existsSync(IMAGE) ? false : 'run `pnpm fixtures` first';
@@ -20,7 +20,7 @@ before(async () => {
   if (skip) return;
   server = await preview({ root: fileURLToPath(new URL('..', import.meta.url)), preview: { port: 0 }, logLevel: 'silent' });
   url = server.resolvedUrls.local[0];
-  browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  browser = await launchBrowser();
 });
 
 // On failure, keep what each open page looked like (CI uploads PC98_SCREENSHOTS).

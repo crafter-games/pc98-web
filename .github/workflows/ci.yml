@@ -24,9 +24,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm fixtures
-      - run: pnpm --filter @pc98-web/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @pc98-web/web exec playwright install --with-deps chromium webkit
       - run: mkdir -p shots && pnpm test
         env:
+          PC98_SCREENSHOTS: ${{ github.workspace }}/shots
+      - name: Browser tests in WebKit (Safari's engine)
+        run: pnpm --filter @pc98-web/web test
+        env:
+          PC98_BROWSER: webkit
           PC98_SCREENSHOTS: ${{ github.workspace }}/shots
       - uses: actions/upload-artifact@v4
         if: always()

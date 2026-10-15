@@ -5,14 +5,14 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { preview } from 'vite';
-import { chromium } from 'playwright';
+import { launchBrowser } from './launch.mjs';
 
 const D = fileURLToPath(new URL('../../../fixtures/private/shizuku/', import.meta.url));
 const skip = existsSync(`${D}sizuku_a.hdm`) && existsSync(`${D}sizuku_b.hdm`) ? false : 'private Shizuku fixtures not present';
 
-test('Shizuku runs at full speed in Chromium and takes keyboard input', { skip, timeout: 120_000 }, async () => {
+test('Shizuku runs at full speed in the browser and takes keyboard input', { skip, timeout: 120_000 }, async () => {
   const server = await preview({ root: fileURLToPath(new URL('..', import.meta.url)), preview: { port: 0 }, logLevel: 'silent' });
-  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     const errors = [];

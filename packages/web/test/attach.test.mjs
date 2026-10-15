@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { preview } from 'vite';
-import { chromium } from 'playwright';
+import { launchBrowser } from './launch.mjs';
 import WebSocket from 'ws';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -36,7 +36,7 @@ function tryConnect(wsUrl, origin) {
 test('an agent attaches to a browser tab and plays there in real time', { skip, timeout: 180_000 }, async () => {
   const server = await preview({ root: fileURLToPath(new URL('..', import.meta.url)), preview: { port: 0 }, logLevel: 'silent' });
   const appUrl = server.resolvedUrls.local[0];
-  const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const browser = await launchBrowser();
   const client = new Client({ name: 'attach-agent', version: '0.0.0' });
   await client.connect(new StdioClientTransport({
     command: process.execPath,

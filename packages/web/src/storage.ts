@@ -178,6 +178,32 @@ class IdbStore implements BlobStore {
   }
 }
 
+/**
+ * Images (covers, thumbnails) are stored as bytes, not Blobs: WebKit cannot
+ * put Blobs in IndexedDB in ephemeral contexts such as Safari private browsing.
+ */
+interface StoredImage { mime: string; bytes: ArrayBuffer }
+const IMAGE_FIELDS = ['cover', 'thumbnail'] as const;
+
+async function toStored<T extends object>(rec: T): Promise<T> {
+  const out = { ...rec } as Record<string, unknown>;
+  for (const f of IMAGE_FIELDS) {
+    const v = out[f];
+    if (v instanceof Blob) out[f] = { mime: v.type || 'image/png', bytes: await v.arrayBuffer() } satisfies StoredImage;
+  }
+  return out as T;
+}
+
+function fromStored<T>(rec: T): T {
+  if (!rec) return rec;
+  const out: Record<string, unknown> = { ...(rec as object) };
+  for (const f of IMAGE_FIELDS) {
+    const v = out[f] as StoredImage | Blob | undefined;
+    if (v && !(v instanceof Blob) && v.bytes) out[f] = new Blob([v.bytes], { type: v.mime });
+  }
+  return out as T;
+}
+
 const HDD_EXT = /\.(hdi|nhd|thd|hdd|vhd)$/i;
 export const DISK_EXT = /\.(fdi|d88|88d|d98|98d|hdm|xdf|dup|nfd|img|ima|hdi|nhd|thd|hdd)$/i;
 
@@ -215,18 +241,20 @@ export class Storage {
   // ---- disks
 
   async listDisks(): Promise<DiskRecord[]> {
-    const all = (await req(this.tx('disks').getAll())) as DiskRecord[];
+    const all = ((await req(this.tx('disks').getAll())) as DiskRecord[]).map(fromStored);
     return all.sort((a, b) => (b.lastUsedAt ?? b.addedAt) - (a.lastUsedAt ?? a.addedAt));
   }
 
   async getDisk(id: string): Promise<DiskRecord | undefined> {
-    return req(this.tx('disks').get(id));
+    return fromStored(await req(this.tx('disks').get(id)));
   }
 
   async addDisk(name: string, bytes: Uint8Array): Promise<DiskRecord> {
     const rec: DiskRecord = { id: newId(), name, kind: diskKind(name), bytes: bytes.length, addedAt: Date.now(), hasSaves: false };
     await this.blobs.put(`disks/${rec.id}`, bytes);
-    await req(this.tx('disks', 'readwrite').put(rec));
+    // Convert before opening the transaction: awaiting inside one lets it auto-commit.
+    const stored = await toStored(rec);
+    await req(this.tx('disks', 'readwrite').put(stored));
     return rec;
   }
 
@@ -265,7 +293,10 @@ export class Storage {
 
   private async patchDisk(id: string, patch: Partial<DiskRecord>): Promise<void> {
     const rec = await this.getDisk(id);
-    if (rec) await req(this.tx('disks', 'readwrite').put({ ...rec, ...patch }));
+    if (rec) {
+      const stored = await toStored({ ...rec, ...patch });
+      await req(this.tx('disks', 'readwrite').put(stored));
+    }
   }
 
   async deleteDisk(id: string): Promise<void> {
@@ -277,7 +308,7 @@ export class Storage {
   // ---- save states
 
   async listStates(): Promise<StateRecord[]> {
-    const all = (await req(this.tx('states').getAll())) as StateRecord[];
+    const all = ((await req(this.tx('states').getAll())) as StateRecord[]).map(fromStored);
     return all.sort((a, b) => b.createdAt - a.createdAt);
   }
 
@@ -285,7 +316,8 @@ export class Storage {
   async saveState(rec: Omit<StateRecord, 'id' | 'createdAt'> & { id?: string }, bytes: Uint8Array): Promise<StateRecord> {
     const full: StateRecord = { ...rec, id: rec.id ?? newId(), createdAt: Date.now() };
     await this.blobs.put(`states/${full.id}`, bytes);
-    await req(this.tx('states', 'readwrite').put(full));
+    const stored = await toStored(full);
+    await req(this.tx('states', 'readwrite').put(stored));
     return full;
   }
 
@@ -366,7 +398,8 @@ export class Storage {
       if (saves) await this.blobs.put(`saves/${d.id}`, saves);
       else await this.blobs.delete(`saves/${d.id}`);
       const cover = data.files[`covers/${d.id}.png`];
-      await req(this.tx('disks', 'readwrite').put({ ...d, hasSaves: !!saves, cover: cover ? new Blob([cover as Uint8Array<ArrayBuffer>], { type: 'image/png' }) : undefined }));
+      const rec = await toStored({ ...d, hasSaves: !!saves, cover: cover ? new Blob([cover as Uint8Array<ArrayBuffer>], { type: 'image/png' }) : undefined });
+      await req(this.tx('disks', 'readwrite').put(rec));
     }
     for (const [path, bytes] of Object.entries(data.files)) {
       if (path.startsWith('rom/')) await this.blobs.put(path, bytes);
@@ -377,7 +410,8 @@ export class Storage {
       if (!bytes) continue;
       const thumb = data.files[`thumbs/${s.id}.png`];
       await this.blobs.put(`states/${s.id}`, bytes);
-      await req(this.tx('states', 'readwrite').put({ ...s, thumbnail: thumb ? new Blob([thumb as Uint8Array<ArrayBuffer>], { type: 'image/png' }) : undefined }));
+      const rec = await toStored({ ...s, thumbnail: thumb ? new Blob([thumb as Uint8Array<ArrayBuffer>], { type: 'image/png' }) : undefined });
+      await req(this.tx('states', 'readwrite').put(rec));
       states++;
     }
     if (data.meta.settings) await this.patchSettings(data.meta.settings);
