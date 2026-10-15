@@ -1,6 +1,6 @@
 // Runs the production build in Chromium: real-time boot, and local persistence
 // (OPFS + IndexedDB) across page reloads and through export/import.
-import { test, before, after } from 'node:test';
+import { test, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,13 +23,26 @@ before(async () => {
   browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 });
 
+// On failure, keep what each open page looked like (CI uploads PC98_SCREENSHOTS).
+afterEach(async (t) => {
+  if (SHOTS && t.passed === false) {
+    let i = 0;
+    for (const page of opened) {
+      if (!page.isClosed()) await page.screenshot({ path: `${SHOTS}/failed-${t.name.replace(/\W+/g, '-')}-${i++}.png`, fullPage: true }).catch(() => {});
+    }
+  }
+  opened.clear();
+});
+
 after(async () => {
   await browser?.close();
   if (server) await new Promise((r) => server.httpServer.close(r));
 });
 
+const opened = new Set();
 async function open(context) {
   const page = await context.newPage();
+  opened.add(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(url);

@@ -25,4 +25,12 @@ jobs:
       - run: pnpm build
       - run: pnpm fixtures
       - run: pnpm --filter @pc98-web/web exec playwright install --with-deps chromium
-      - run: pnpm test
+      - run: mkdir -p shots && pnpm test
+        env:
+          PC98_SCREENSHOTS: ${{ github.workspace }}/shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots
+          if-no-files-found: ignore
