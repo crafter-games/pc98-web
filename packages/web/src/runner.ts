@@ -125,7 +125,11 @@ export class Runner {
     while (this.debtMs >= frameMs && frames < MAX_FRAMES_PER_TICK) {
       const before = this.pc.elapsedMs;
       this.pumpKeys();
-      if (!this.pc.runFrame(true)) break;
+      if (!this.pc.runFrame(true)) {
+        this.resolveWaiters(false);
+        break;
+      }
+      this.resolveWaiters(true);
       this.debtMs -= this.pc.elapsedMs - before || frameMs;
       this.pumpAudio();
       frames++;
@@ -216,6 +220,26 @@ export class Runner {
   }
 
   private resumeOnVisible = false;
+  private waiters: { frame: number; resolve: (alive: boolean) => void }[] = [];
+
+  /**
+   * Resolves after the render loop has run `frames` more frames (false if the
+   * machine powers off). Used by an attached agent: time passes in real time.
+   */
+  waitFrames(frames: number): Promise<boolean> {
+    if (!this.pc.isPowered) return Promise.resolve(false);
+    return new Promise((resolve) => this.waiters.push({ frame: this.pc.frames + frames, resolve }));
+  }
+
+  private resolveWaiters(alive: boolean): void {
+    if (!this.waiters.length) return;
+    const now = this.pc.frames;
+    this.waiters = this.waiters.filter((w) => {
+      if (alive && w.frame > now) return true;
+      w.resolve(alive);
+      return false;
+    });
+  }
   private readonly downAt = new Map<number, number>();
   private readonly keyQueue: { code: number; down: boolean }[] = [];
 

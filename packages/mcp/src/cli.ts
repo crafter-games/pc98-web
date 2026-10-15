@@ -2,6 +2,7 @@
 import { parseArgs } from 'node:util';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createServer } from './server.js';
+import { BrowserBridge, DEFAULT_ALLOWED_ORIGINS } from './bridge.js';
 import { Session } from './session.js';
 
 const HELP = `pc98-mcp: MCP server for a PC-9801 emulator (stdio transport)
@@ -16,6 +17,13 @@ Usage: pc98-mcp [options]
   --load-state <name> Restore this save state at start
   --cpu <i386|i286>   Default i386
   --epoch <iso>       Fixed emulated clock at power-on (reproducible runs)
+
+Browser attach (the pair_browser tool; nothing listens until it is called):
+  --attach-port <n>   127.0.0.1 port for the tab bridge. Default 8098 (0 = any)
+  --app-url <url>     Web app the pairing link opens. Default https://pc98.crafter.games/
+  --allow-origin <o>  Extra origin allowed to attach (repeatable). Always allowed:
+                      ${DEFAULT_ALLOWED_ORIGINS.join(', ')}
+  --no-attach         Disable browser attach entirely
   -h, --help
 `;
 
@@ -29,6 +37,10 @@ const { values } = parseArgs({
     'load-state': { type: 'string' },
     cpu: { type: 'string' },
     epoch: { type: 'string' },
+    'attach-port': { type: 'string' },
+    'app-url': { type: 'string' },
+    'allow-origin': { type: 'string', multiple: true },
+    'no-attach': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -48,12 +60,23 @@ for (const drive of ['fdd1', 'fdd2', 'hdd1'] as const) {
 session.machine.reset();
 if (values['load-state']) session.loadState(values['load-state']);
 
-const server = createServer(session);
+const bridge = values['no-attach'] ? undefined : new BrowserBridge({
+  port: values['attach-port'] !== undefined ? Number(values['attach-port']) : 8098,
+  appUrl: values['app-url'],
+  allowedOrigins: [...DEFAULT_ALLOWED_ORIGINS, ...(values['allow-origin'] ?? [])],
+});
+const server = createServer(session, bridge);
+if (bridge) {
+  bridge.onChange = () => {
+    process.stderr.write(bridge.attached ? 'pc98-mcp: browser tab attached\n' : 'pc98-mcp: browser tab detached\n');
+  };
+}
 await server.connect(new StdioServerTransport());
 process.stderr.write(`pc98-mcp ready (data: ${session.home})\n`);
 
 const shutdown = () => {
   session.flush();
+  void bridge?.close();
   process.exit(0);
 };
 process.on('SIGINT', shutdown);

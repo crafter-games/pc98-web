@@ -122,3 +122,5 @@ fieldset select { padding: 6px; border-radius: 6px; border: 1px solid color-mix(
 }
 .vkbd button:active { transform: translateY(1px); box-shadow: none; }
 @media (max-width: 520px) { header .sub { display: none; } }
+.agent { margin: 10px 0 0; padding: 8px 12px; border-radius: 6px; font-size: 14px; background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.agent.attached::before { content: "● "; color: var(--accent); }

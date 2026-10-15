@@ -16,10 +16,13 @@
     "preact": "^11.0.1"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@preact/preset-vite": "^2.10.6",
     "fake-indexeddb": "^6.2.5",
+    "pc98-mcp": "workspace:*",
     "playwright": "^1.64.1",
     "typescript": "^5.9.3",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "ws": "^8.22.0"
   }
 }

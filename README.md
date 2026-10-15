@@ -63,11 +63,20 @@ The server keeps its data in `~/.pc98/` (`--home` to change it):
 Time only advances inside tool calls, so runs are deterministic (fix the clock
 with `--epoch 1996-01-26T12:00:00`) and an agent can think as long as it needs.
 
+### Attach to a browser tab
+
+`pair_browser` gives the agent a one-time link (valid 10 minutes) for you to
+open. The PC-98 Web tab then attaches to the server over a WebSocket on
+`127.0.0.1` (port 8098 by default, opened only when pairing), and every tool
+acts on the game you are watching, in real time, with that browser's library
+and states. The page shows when an agent is in control; `detach_browser` or the
+page's "Desconectar agente" button hands it back.
+
 Tools: `screenshot`, `read_text`, `press_key`, `type_text`, `mouse`, `run`
 (for N seconds, `until_text`, or `until_stable_seconds`), `list_disks`,
 `insert_disk`, `eject_disk`, `discard_disk_saves`, `reset`, `power_on`,
 `save_state`, `load_state`, `list_states`, `status`, `read_memory`,
-`write_memory`, `record_audio`.
+`write_memory`, `record_audio`, `pair_browser`, `detach_browser`.
 
 ## Headless use
 

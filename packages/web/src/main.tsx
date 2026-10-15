@@ -5,6 +5,7 @@ import { Machine, SLOTS, type SlotId } from './machine';
 import { DEFAULT_DISPLAY, DISK_EXT, Storage, type DiskRecord, type DisplaySettings, type StateRecord } from './storage';
 import { Settings } from './components/Settings';
 import { VirtualKeyboard } from './components/VirtualKeyboard';
+import { AgentBridge, type BridgeState } from './agent-bridge';
 import { exportBackup, importBackup } from './backup';
 import './style.css';
 
@@ -48,6 +49,8 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showKeyboard, setShowKeyboard] = useState(false);
   const screenRef = useRef<HTMLDivElement>(null);
+  const [bridge, setBridge] = useState<AgentBridge>();
+  const [agent, setAgent] = useState<{ state: BridgeState; detail?: string; last?: string }>({ state: 'closed' });
   const [scale, setScale] = useState<number>();
   const version = useMachineVersion(machine);
 
@@ -73,6 +76,21 @@ function App() {
       setRunner(r);
       (window as any).pc98 = m.pc;
       (window as any).pc98machine = m;
+
+      const b = new AgentBridge(m, r);
+      b.onState = (state, detail) => setAgent((a) => ({ ...a, state, detail }));
+      b.onActivity = (what) => setAgent((a) => ({ ...a, last: what }));
+      setBridge(b);
+      // Pairing links from pc98-mcp look like https://pc98.crafter.games/#agent=ws://127.0.0.1:8098/TOKEN
+      // (also handled when pasted into an already open tab, which only changes the hash).
+      const pairFromHash = () => {
+        const pairing = new URLSearchParams(location.hash.slice(1)).get('agent');
+        if (!pairing) return;
+        history.replaceState(null, '', location.pathname + location.search); // the token is single-use
+        try { b.connect(pairing); } catch (e) { setError(String(e)); }
+      };
+      pairFromHash();
+      window.addEventListener('hashchange', pairFromHash);
     })().catch((e) => setError(String(e)));
 
     const flush = () => void m?.flush();
@@ -85,6 +103,20 @@ function App() {
       r?.dispose();
     };
   }, []);
+
+  // Keep the play/pause button in sync when an agent starts the machine.
+  useEffect(() => {
+    if (agent.state !== 'attached' || !runner) return;
+    const t = setInterval(() => setRunning(runner.isRunning), 500);
+    return () => clearInterval(t);
+  }, [agent.state, runner]);
+
+  const connectAgent = () => {
+    if (!bridge) return;
+    const input = prompt('Pega el enlace que te dio el agente (ws://127.0.0.1:PUERTO/TOKEN)');
+    if (!input) return;
+    try { bridge.connect(input); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
 
   useEffect(() => {
     if (!machine) return;
@@ -231,8 +263,17 @@ function App() {
           <button class="secondary" onClick={() => setShowKeyboard(!showKeyboard)} aria-pressed={showKeyboard}>Teclas PC-98</button>
           <button class="secondary" onClick={fullscreen} title="Doble clic en la pantalla">Pantalla completa</button>
           <button class="secondary" onClick={() => setShowSettings(true)} disabled={!machine}>Ajustes</button>
+          {agent.state === 'closed'
+            ? <button class="secondary" onClick={connectAgent} disabled={!bridge}>Conectar agente</button>
+            : <button class="secondary" onClick={() => bridge?.close()}>Desconectar agente</button>}
         </div>
       </section>
+      {agent.state !== 'closed' && (
+        <p class={`agent ${agent.state}`} role="status">
+          {agent.state === 'connecting' ? 'Conectando con el agente…' : `Un agente controla esta pestaña${agent.last ? ` · última acción: ${agent.last}` : ''}`}
+        </p>
+      )}
+      {agent.state === 'closed' && agent.detail && <p class="hint">Agente desconectado: {agent.detail}</p>}
       {showKeyboard && runner && <VirtualKeyboard runner={runner} />}
       {showSettings && machine && (
         <Settings

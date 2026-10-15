@@ -18,10 +18,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@pc98-web/core": "workspace:*",
+    "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
     "typescript": "^7.0.2"
   }
 }
