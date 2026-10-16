@@ -34,6 +34,8 @@ export interface RunOptions {
   untilText?: string;
   /** Stop once the picture has not changed for this long. */
   untilStableSeconds?: number;
+  /** Stop as soon as the picture differs from when the run started (more than a blinking icon). */
+  untilChanged?: boolean;
 }
 
 /**
@@ -78,7 +80,7 @@ export interface AdvanceStep {
 }
 
 export interface RunResult {
-  outcome: 'ran' | 'text-matched' | 'stable' | 'timeout' | 'powered-off';
+  outcome: 'ran' | 'text-matched' | 'stable' | 'changed' | 'timeout' | 'powered-off';
   /** Emulated seconds that passed. */
   seconds: number;
 }
@@ -162,7 +164,7 @@ export class AgentOps {
 
   async run(opts: RunOptions): Promise<RunResult> {
     const pc = this.pc();
-    const conditional = opts.untilText !== undefined || opts.untilStableSeconds !== undefined;
+    const conditional = opts.untilText !== undefined || opts.untilStableSeconds !== undefined || !!opts.untilChanged;
     const maxFrames = secondsToFrames(opts.seconds ?? (conditional ? 60 : 1));
     const re = opts.untilText !== undefined ? new RegExp(opts.untilText, 'm') : undefined;
     const stableFrames = opts.untilStableSeconds !== undefined ? secondsToFrames(opts.untilStableSeconds) : 0;
@@ -175,12 +177,14 @@ export class AgentOps {
     // Check every few frames: cheap enough headless, and in real time the
     // page only renders once per animation frame anyway.
     const step = 4;
-    let seen = new Set<number>([hashRgba(pc.screen().rgba)]);
+    const start0 = pc.screen().rgba;
+    let seen = new Set<number>([hashRgba(start0)]);
     let sameFor = 0;
     let disk = pc.diskActivity;
     for (let ran = 0; ran < maxFrames; ran += step) {
       if (!(await this.clock.advance(Math.min(step, maxFrames - ran)))) return done('powered-off');
       if (re && re.test(this.pc().textScreen())) return done('text-matched');
+      if (opts.untilChanged && changedPixels(start0, this.pc().screen().rgba) > DEFAULT_STABLE_TOLERANCE) return done('changed');
       if (stableFrames) {
         const h = hashRgba(this.pc().screen().rgba);
         const nowDisk = this.pc().diskActivity;
@@ -203,23 +207,39 @@ export class AgentOps {
   }
 
   /**
-   * Presses a key repeatedly the way a reader advances a visual novel: one
-   * press, wait for the screen to settle (ignoring blinking icons), capture,
-   * repeat. Nothing drawn between presses is lost.
+   * Presses a key repeatedly the way a reader advances a visual novel, and
+   * captures each page. After a press it waits for the screen to change, then
+   * to settle; black screens do not count as settled, and if the picture moves
+   * again on its own shortly after settling (fades, scene changes, scripted
+   * pauses) it keeps waiting. Stops early when a press changes nothing.
    */
   async advance(opts: AdvanceOptions = {}): Promise<AdvanceStep[]> {
     const steps: AdvanceStep[] = [];
     const key = opts.key ?? 'RETURN';
     const settle = opts.settleSeconds ?? 0.4;
+    const maxWait = opts.maxWaitSeconds ?? 8;
+    const grace = 0.8;
     for (let i = 0; i < (opts.presses ?? 1); i++) {
-      const before = this.pc().screen().rgba;
+      const pc = this.pc();
+      const t0 = pc.elapsedMs;
+      const left = () => maxWait - (this.pc().elapsedMs - t0) / 1000;
       this.pressKey(key);
       await this.settle(0);
-      const r = await this.run({ seconds: opts.maxWaitSeconds ?? 5, untilStableSeconds: settle });
-      if (r.outcome === 'powered-off') break;
+      const moved = await this.run({ seconds: maxWait, untilChanged: true });
+      if (moved.outcome === 'powered-off') break;
+      const unchanged = moved.outcome !== 'changed';
+      let settled = false;
+      while (!unchanged && left() > 0) {
+        const r = await this.run({ seconds: Math.max(left(), 0.1), untilStableSeconds: settle });
+        if (r.outcome !== 'stable') break;
+        const blank = isBlank(this.pc().screen().rgba);
+        const again = await this.run({ seconds: blank ? Math.max(left(), 0.1) : grace, untilChanged: true });
+        if (again.outcome === 'changed') continue; // still transitioning
+        settled = !blank;
+        break;
+      }
       const screen = this.pc().screen();
-      const unchanged = changedPixels(before, screen.rgba) <= DEFAULT_STABLE_TOLERANCE;
-      steps.push({ seconds: r.seconds, settled: r.outcome === 'stable', screen, text: this.readText(), unchanged });
+      steps.push({ seconds: (this.pc().elapsedMs - t0) / 1000, settled, screen, text: this.readText(), unchanged });
       if (unchanged) break;
     }
     return steps;
@@ -253,4 +273,13 @@ export function changedPixels(a: Uint8ClampedArray, b: Uint8ClampedArray): numbe
   let n = 0;
   for (let i = 0; i < wa.length; i++) if (wa[i] !== wb[i]) n++;
   return n;
+}
+
+/** True when nearly every pixel has the same color (black or blank transition screens). */
+export function isBlank(rgba: Uint8ClampedArray): boolean {
+  const w = new Uint32Array(rgba.buffer, rgba.byteOffset, rgba.byteLength >> 2);
+  const first = w[0];
+  let other = 0;
+  for (let i = 0; i < w.length; i += 7) if (w[i] !== first) other++;
+  return other < (w.length / 7) * 0.003;
 }

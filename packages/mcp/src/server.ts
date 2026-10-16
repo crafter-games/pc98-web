@@ -40,10 +40,30 @@ export function diskPrompt(screen: string): string | undefined {
   return m[1].replace(/[Ａ-Ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).toUpperCase();
 }
 
+/** The letter a multi-disk set's image name ends with: "sizuku_c.hdm" -> "C". */
+function diskLetter(name: string): string | undefined {
+  return /(?:^|[_\-\s.(\[])(?:disk\s*)?([a-z0-9])\)?\]?\.[a-z0-9]+$/i.exec(name)?.[1].toUpperCase();
+}
+
+/** "sizuku_a.hdm, sizuku_b.hdm..." -> a hint on which disk goes where. */
+function diskSetHint(names: string[]): string | undefined {
+  const sets = new Map<string, string[]>();
+  for (const n of names) {
+    const letter = diskLetter(n);
+    if (!letter || !/[A-Z]/.test(letter)) continue;
+    const stem = n.slice(0, n.length - n.replace(/^.*?([_\-\s.(\[](?:disk\s*)?[a-z0-9]\)?\]?\.[a-z0-9]+)$/i, '$1').length);
+    sets.set(stem, [...(sets.get(stem) ?? []), n]);
+  }
+  const multi = [...sets.values()].filter((s) => s.length > 1).map((s) => s.sort());
+  if (!multi.length) return undefined;
+  return multi.map((s) => `Multi-disk set ${s.join(', ')}: usually boot with ${s[0]} in fdd1 and ${s[1]} in fdd2; the game asks for the others by letter.`).join('\n');
+}
+
 const OUTCOMES: Record<RunResult['outcome'], string> = {
   ran: 'ran for the full time',
   'text-matched': 'the text matched',
   stable: 'the screen is stable',
+  changed: 'the screen changed',
   timeout: 'timed out before the condition was met',
   'powered-off': 'the machine powered off',
 };
@@ -71,7 +91,8 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
       const saved = await b.flush();
       if (saved.length) content.push(text(`(saved guest writes to: ${saved.join(', ')})`));
       const wanted = diskPrompt(await b.readText());
-      if (wanted) {
+      const inserted = wanted ? (await b.listDisks()).some((d) => d.drives.length && diskLetter(d.name) === wanted) : false;
+      if (wanted && !inserted) {
         content.push(text(`Note: the game is asking for disk ${wanted}. Insert the matching image (from list_disks; its name usually ends in "${wanted.toLowerCase()}" or "${wanted}") with insert_disk into the drive it reads from (usually fdd2), then press RETURN to continue.`));
       }
       if (!(await b.clock()).powered) content.push(text('The machine is powered off. Call `reset` or `power_on` to start it again.'));
@@ -126,11 +147,11 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
 
   server.registerTool('advance', {
     title: 'Advance dialogue',
-    description: 'Reads a visual novel forward: presses a key (default RETURN), waits until the screen settles (blinking "waiting for input" icons are ignored), and returns a screenshot of each page, so no line is skipped. Stops early when a press changes nothing on screen (for example at a choice menu, where you move with UP/DOWN first).',
+    description: 'Reads a visual novel forward: presses a key (default RETURN), waits for the screen to change and then settle (blinking "waiting for input" icons are ignored; black screens, fades and short scripted pauses are waited out), and returns a screenshot of each page, so no line is skipped. Stops early when a press changes nothing within max_wait_seconds.',
     inputSchema: {
       presses: z.number().int().min(1).max(20).optional().describe('How many times to advance. Default 1.'),
       key: z.string().optional().describe('Key to press. Default RETURN.'),
-      max_wait_seconds: z.number().min(0.5).max(30).optional().describe('Longest wait for the screen to settle after a press. Default 5.'),
+      max_wait_seconds: z.number().min(0.5).max(30).optional().describe('Longest wait per press for the screen to change and settle. Default 8.'),
       screenshots: z.enum(['each', 'last', 'none']).optional().describe('Screenshots to return. Default each.'),
     },
   }, tool(async (a, b) => {
@@ -139,14 +160,15 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
     const out: Content = [];
     for (const [i, st] of steps.entries()) {
       const how = st.unchanged
-        ? 'nothing changed on screen, so advancing stopped here (a choice menu waiting for arrow keys, or the game wants a different key)'
-        : st.settled ? `settled after ${st.seconds.toFixed(1)}s` : `still changing after ${st.seconds.toFixed(1)}s`;
+        ? `nothing changed in ${st.seconds.toFixed(1)}s after the press, so advancing stopped. Look at the screenshot: a choice menu (move with UP/DOWN, the cursor may appear only then), a longer scripted pause (try run with until_changed), or the game wants another key.`
+        : st.settled ? `settled after ${st.seconds.toFixed(1)}s` : `still changing or blank after ${st.seconds.toFixed(1)}s (a long transition: run with until_stable_seconds, or advance again)`;
       out.push(text(`press ${i + 1}: ${how}${st.text.trim() ? `\nText screen:\n${st.text}` : ''}`));
       if (mode === 'each' || (mode === 'last' && i === steps.length - 1)) {
         out.push({ type: 'image', mimeType: 'image/png', data: encodePng(st.screen.width, st.screen.height, st.screen.rgba).toString('base64') });
       }
     }
     if (!steps.length) out.push(text('The machine is powered off.'));
+    out.push(text(await when(b)));
     return out;
   }));
 
@@ -170,16 +192,17 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
 
   server.registerTool('run', {
     title: 'Let time pass',
-    description: 'Runs the machine. Without conditions it runs `seconds`. With until_text it stops as soon as the text screen matches; with until_stable_seconds it stops once the picture has not changed for that long. Headless it runs much faster than real time.',
+    description: 'Runs the machine. Without conditions it runs `seconds`. With until_text it stops as soon as the text screen matches; with until_stable_seconds once the picture has stopped changing for that long; with until_changed as soon as it changes. Headless it runs much faster than real time.',
     inputSchema: {
       seconds: z.number().min(0).max(600).optional().describe('Emulated seconds to run when no condition is given, or the timeout when one is. Default 1 (or 60 with a condition).'),
       until_text: z.string().optional().describe('JavaScript regular expression tested against the text screen.'),
       until_stable_seconds: z.number().min(0.1).max(30).optional().describe('Stop when the screen has stopped changing for this long. Blinking cursors and icons that flip back and forth count as stable; disk loading does not.'),
+      until_changed: z.boolean().optional().describe('Stop as soon as the picture changes (more than a blinking icon). Useful to wait out a scripted pause or a transition.'),
       screenshot: z.boolean().optional().describe('Return a screenshot at the end. Default true.'),
     },
   }, tool(async (a, b) => {
     if (a.until_text !== undefined) new RegExp(a.until_text); // report bad patterns before running
-    const r = await b.run({ seconds: a.seconds, untilText: a.until_text, untilStableSeconds: a.until_stable_seconds });
+    const r = await b.run({ seconds: a.seconds, untilText: a.until_text, untilStableSeconds: a.until_stable_seconds, untilChanged: a.until_changed });
     const out: Content = [text(`${OUTCOMES[r.outcome]} after ${r.seconds.toFixed(2)}s (${await when(b)})`)];
     if (a.screenshot ?? true) out.push(await screenshotContent(b));
     return out;
@@ -192,6 +215,8 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
   }, tool(async (_a, b) => {
     const disks = await b.listDisks();
     const lines = disks.map((d) => `${d.name}  [${d.kind}, ${(d.bytes / 1024).toFixed(0)} KB${d.hasSaves ? ', has saves' : ''}${d.drives.length ? `, in ${d.drives.join(',')}` : ''}]`);
+    const hint = diskSetHint(disks.filter((d) => d.kind === 'fdd').map((d) => d.name));
+    if (hint) lines.push('', hint);
     const empty = b.kind === 'headless' ? `No disk images. Add some to ${session.diskDirs[0]}` : 'The tab\'s library is empty: ask the user to drop disk images on the page.';
     return [text(lines.length ? lines.join('\n') : empty)];
   }));
@@ -259,7 +284,7 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
 
   server.registerTool('load_state', {
     title: 'Load state',
-    description: 'Restores a named save state, re-inserting the disks it was saved with.',
+    description: 'Restores a named save state, re-inserting the disks it was saved with, and returns a screenshot of the restored screen.',
     inputSchema: { name: z.string() },
   }, tool(async (a, b) => {
     await b.loadState(a.name);
