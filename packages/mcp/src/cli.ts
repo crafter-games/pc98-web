@@ -66,8 +66,9 @@ for (const drive of ['fdd1', 'fdd2', 'hdd1'] as const) {
 session.machine.reset();
 if (values['load-state']) session.loadState(values['load-state']);
 
-const bundledApp = fileURLToPath(new URL('../../web/dist', import.meta.url));
-const appDir = values['app-dir'] ?? (existsSync(`${bundledApp}/index.html`) ? bundledApp : undefined);
+// The npm package ships the app next to dist/; in the monorepo it is packages/web/dist.
+const appCandidates = [new URL('../app', import.meta.url), new URL('../../web/dist', import.meta.url)].map((u) => fileURLToPath(u));
+const appDir = values['app-dir'] ?? appCandidates.find((d) => existsSync(`${d}/index.html`));
 const bridge = values['no-attach'] ? undefined : new BrowserBridge({
   port: values['attach-port'] !== undefined ? Number(values['attach-port']) : 8098,
   appUrl: values['app-url'],

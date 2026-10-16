@@ -101,6 +101,17 @@ pc.runFrames(120);
 console.log(pc.textScreen());
 ```
 
+## Releasing pc98-mcp
+
+`packages/mcp/scripts/release.mjs` assembles a self-contained npm package
+(server, WASM core, font and web app) in `packages/mcp/release`:
+
+```sh
+pnpm build
+node packages/mcp/scripts/release.mjs
+cd packages/mcp/release && npm pack   # or npm publish
+```
+
 ## Deployment
 
 `Dockerfile` builds the WASM cores and the web app and serves them with nginx.

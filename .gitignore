@@ -30,3 +30,4 @@ fixtures/public/cache/
 *.rar
 *.lzh
 *.7z
+packages/mcp/release/
