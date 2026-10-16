@@ -16,12 +16,13 @@ By default the machine is headless and only advances when you call a tool: time 
 How to work:
 - See the screen with \`screenshot\`. Many games, especially visual novels, draw text as graphics, so text only shows up in screenshots.
 - \`read_text\` returns the text-mode screen (DOS prompts, menus, some games' prompts like "insert disk C") as Unicode. It is cheap: try it before a screenshot.
+- To read a visual novel, use \`advance\`: it presses RETURN (or another key) and returns a screenshot after each press once the screen has settled, so no line of dialogue is skipped.
 - Input tools (\`press_key\`, \`type_text\`, \`mouse\`) deliver the input and then let a little time pass (\`wait_seconds\`).
 - \`run\` lets time pass: a fixed time, or until some text appears (\`until_text\`) or the picture stops changing (\`until_stable_seconds\`).
 - Disks: \`list_disks\` shows the local library; \`insert_disk\` mounts one. Multi-disk games ask for disks by letter (A, B, C...) in the text layer; insert the matching image into the drive they read from (usually fdd2) and confirm with RETURN. The guest's writes (game saves) are kept in a save overlay, never written to the original image.
 - Save states (\`save_state\` / \`load_state\`) snapshot the whole machine. Save one before risky choices.
 - \`pair_browser\` gives the user a link that attaches their browser tab: tools then act on the game they are watching, in real time, until \`detach_browser\`.
-Visual novels on PC-98 usually advance with RETURN or SPACE, use the arrow keys or the numeric keypad to move between choices, and ESC or the right mouse button for menus.`;
+Visual novels on PC-98 usually advance with RETURN or SPACE. In choice menus the cursor may only appear after you press an arrow key; move with UP/DOWN and confirm with RETURN (digit keys often do nothing). ESC or the right mouse button opens game menus.`;
 
 const DRIVE = z.enum(['fdd1', 'fdd2', 'hdd1', 'hdd2']);
 
@@ -29,6 +30,14 @@ type Content = CallToolResult['content'];
 
 function text(s: string): Content[number] {
   return { type: 'text', text: s };
+}
+
+/** Recognizes "insert disk X" prompts in the text layer, in Japanese and English. */
+export function diskPrompt(screen: string): string | undefined {
+  const m = /ディスク\s*([Ａ-Ｚ０-９A-Z0-9]{1,2})\s*を?\s*(?:挿入|入れ|セット|ドライブ)/.exec(screen)
+    ?? /insert\s+(?:the\s+)?disk\s*#?\s*([A-Z0-9]{1,2})\b/i.exec(screen);
+  if (!m) return undefined;
+  return m[1].replace(/[Ａ-Ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).toUpperCase();
 }
 
 const OUTCOMES: Record<RunResult['outcome'], string> = {
@@ -61,6 +70,10 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
       const content = await fn(args, b);
       const saved = await b.flush();
       if (saved.length) content.push(text(`(saved guest writes to: ${saved.join(', ')})`));
+      const wanted = diskPrompt(await b.readText());
+      if (wanted) {
+        content.push(text(`Note: the game is asking for disk ${wanted}. Insert the matching image (from list_disks; its name usually ends in "${wanted.toLowerCase()}" or "${wanted}") with insert_disk into the drive it reads from (usually fdd2), then press RETURN to continue.`));
+      }
       if (!(await b.clock()).powered) content.push(text('The machine is powered off. Call `reset` or `power_on` to start it again.'));
       return { content };
     } catch (e) {
@@ -99,16 +112,43 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
 
   server.registerTool('press_key', {
     title: 'Press a key',
-    description: 'Presses and releases one PC-98 key, optionally with SHIFT/CTRL/GRPH held. Key names: RETURN, SPACE, ESC, BS, TAB, UP, DOWN, LEFT, RIGHT, F1-F10, VF1-VF5, ROLLUP, ROLLDOWN, INS, DEL, HOME (CLR), HELP, STOP, COPY, XFER, NFER, KANA, CAPS, NUM0-NUM9, letters A-Z, digits 0-9.',
+    description: 'Presses and releases one PC-98 key, optionally with SHIFT/CTRL/GRPH held. To read dialogue, prefer `advance`, which waits for the text after each press. Key names: RETURN, SPACE, ESC, BS, TAB, UP, DOWN, LEFT, RIGHT, F1-F10, VF1-VF5, ROLLUP, ROLLDOWN, INS, DEL, HOME (CLR), HELP, STOP, COPY, XFER, NFER, KANA, CAPS, NUM0-NUM9, letters A-Z, digits 0-9.',
     inputSchema: {
       key: z.string().describe('Key name, e.g. "RETURN", "SPACE", "DOWN", "F1", "Y".'),
       shift: z.boolean().optional(),
       ctrl: z.boolean().optional(),
       grph: z.boolean().optional().describe('GRPH is the PC-98 Alt key.'),
       times: z.number().int().min(1).max(50).optional().describe('Press it this many times. Default 1.'),
+      interval_seconds: z.number().min(0.05).max(10).optional().describe('Pause between repeated presses. Default 0.3.'),
       ...inputOpts,
     },
-  }, tool((a, b) => afterInput(b, a, { type: 'key', key: a.key, opts: { shift: a.shift, ctrl: a.ctrl, grph: a.grph, times: a.times } })));
+  }, tool((a, b) => afterInput(b, a, { type: 'key', key: a.key, opts: { shift: a.shift, ctrl: a.ctrl, grph: a.grph, times: a.times, intervalSeconds: a.interval_seconds } })));
+
+  server.registerTool('advance', {
+    title: 'Advance dialogue',
+    description: 'Reads a visual novel forward: presses a key (default RETURN), waits until the screen settles (blinking "waiting for input" icons are ignored), and returns a screenshot of each page, so no line is skipped. Stops early when a press changes nothing on screen (for example at a choice menu, where you move with UP/DOWN first).',
+    inputSchema: {
+      presses: z.number().int().min(1).max(20).optional().describe('How many times to advance. Default 1.'),
+      key: z.string().optional().describe('Key to press. Default RETURN.'),
+      max_wait_seconds: z.number().min(0.5).max(30).optional().describe('Longest wait for the screen to settle after a press. Default 5.'),
+      screenshots: z.enum(['each', 'last', 'none']).optional().describe('Screenshots to return. Default each.'),
+    },
+  }, tool(async (a, b) => {
+    const steps = await b.advance({ presses: a.presses, key: a.key, maxWaitSeconds: a.max_wait_seconds });
+    const mode = a.screenshots ?? 'each';
+    const out: Content = [];
+    for (const [i, st] of steps.entries()) {
+      const how = st.unchanged
+        ? 'nothing changed on screen, so advancing stopped here (a choice menu waiting for arrow keys, or the game wants a different key)'
+        : st.settled ? `settled after ${st.seconds.toFixed(1)}s` : `still changing after ${st.seconds.toFixed(1)}s`;
+      out.push(text(`press ${i + 1}: ${how}${st.text.trim() ? `\nText screen:\n${st.text}` : ''}`));
+      if (mode === 'each' || (mode === 'last' && i === steps.length - 1)) {
+        out.push({ type: 'image', mimeType: 'image/png', data: encodePng(st.screen.width, st.screen.height, st.screen.rgba).toString('base64') });
+      }
+    }
+    if (!steps.length) out.push(text('The machine is powered off.'));
+    return out;
+  }));
 
   server.registerTool('type_text', {
     title: 'Type text',
@@ -134,7 +174,7 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
     inputSchema: {
       seconds: z.number().min(0).max(600).optional().describe('Emulated seconds to run when no condition is given, or the timeout when one is. Default 1 (or 60 with a condition).'),
       until_text: z.string().optional().describe('JavaScript regular expression tested against the text screen.'),
-      until_stable_seconds: z.number().min(0.1).max(30).optional().describe('Stop when the screen has not changed for this long.'),
+      until_stable_seconds: z.number().min(0.1).max(30).optional().describe('Stop when the screen has stopped changing for this long. Blinking cursors and icons that flip back and forth count as stable; disk loading does not.'),
       screenshot: z.boolean().optional().describe('Return a screenshot at the end. Default true.'),
     },
   }, tool(async (a, b) => {
@@ -223,7 +263,7 @@ export function createServer(session: Session, bridge?: BrowserBridge): McpServe
     inputSchema: { name: z.string() },
   }, tool(async (a, b) => {
     await b.loadState(a.name);
-    return [text(`Loaded "${a.name}" (${await when(b)}).`), await screenshotContent(b)];
+    return [text(`Loaded "${a.name}". The screen now:`), await screenshotContent(b)];
   }));
 
   server.registerTool('list_states', {

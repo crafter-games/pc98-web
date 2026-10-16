@@ -80,6 +80,7 @@ test('an agent plays Shizuku from power-on to the first dialogue, swapping disks
     // The game asks for disk C in the text layer.
     const ask = await call(client, 'run', { seconds: 30, until_text: 'ディスク\\s*Ｃ', screenshot: false });
     assert.match(ask.text, /text matched/);
+    assert.match(ask.text, /the game is asking for disk C/);
     assert.match((await call(client, 'read_text')).text, /ドライブにディスク Ｃ を挿入して下さい/);
     await call(client, 'insert_disk', { drive: 'fdd2', name: 'sizuku_c.hdm' });
     await step('2f-after-disk', 'RETURN', 0.5);
@@ -93,6 +94,14 @@ test('an agent plays Shizuku from power-on to the first dialogue, swapping disks
     const next = await call(client, 'press_key', { key: 'RETURN', wait_seconds: 3, screenshot: true });
     shot('4-next-line', next.image);
     assert.ok(diff(next.image, first.image) > 0.01, 'dialogue should advance');
+
+    // advance returns one settled page per press, despite the blinking prompt icon.
+    const res = await client.callTool({ name: 'advance', arguments: { presses: 3 } });
+    const pages = res.content.filter((c) => c.type === 'image');
+    assert.equal(pages.length, 3);
+    assert.equal(res.content.filter((c) => c.type === 'text' && /settled after/.test(c.text)).length, 3);
+    for (const [i, page] of pages.entries()) shot(`5-advance-${i + 1}`, page);
+    assert.ok(diff(pages[0], pages[1]) > 0.01 && diff(pages[1], pages[2]) > 0.01, 'each press shows a new page');
 
     // The state brings back the exact first line.
     const again = await call(client, 'load_state', { name: 'first-line' });

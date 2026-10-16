@@ -1,5 +1,5 @@
-import type { MachineConfig, RunOptions, RunResult } from '@pc98-web/core';
-import type { Backend, DiskInfo, DriveId, InputOp, ScreenImage, StateInfo } from './types.js';
+import type { AdvanceOptions, MachineConfig, RunOptions, RunResult } from '@pc98-web/core';
+import type { AdvanceResult, Backend, DiskInfo, DriveId, InputOp, ScreenImage, StateInfo } from './types.js';
 
 /** Sends one RPC to the attached page and resolves with its result. */
 export type Rpc = (method: string, params: Record<string, unknown>, timeoutMs: number) => Promise<any>;
@@ -32,6 +32,11 @@ export class RemoteBackend implements Backend {
 
   run(opts: RunOptions): Promise<RunResult> {
     return this.rpc('run', opts as Record<string, unknown>, timeoutFor(opts.seconds ?? 60));
+  }
+
+  async advance(opts: AdvanceOptions): Promise<AdvanceResult[]> {
+    const steps = await this.rpc('advance', opts as Record<string, unknown>, timeoutFor((opts.presses ?? 1) * (opts.maxWaitSeconds ?? 5)));
+    return steps.map((st: any) => ({ ...st, screen: { width: st.screen.width, height: st.screen.height, rgba: unb64(st.screen.rgba) } }));
   }
 
   listDisks(): Promise<DiskInfo[]> { return this.rpc('listDisks', {}, 10_000); }

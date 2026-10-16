@@ -1,8 +1,10 @@
-import type { KeyOptions, MachineConfig, MouseOptions, RunOptions, RunResult } from '@pc98-web/core';
+import type { AdvanceOptions, KeyOptions, MachineConfig, MouseOptions, RunOptions, RunResult } from '@pc98-web/core';
 
 export type DriveId = 'fdd1' | 'fdd2' | 'hdd1' | 'hdd2';
 
 export interface ScreenImage { width: number; height: number; rgba: Uint8Array }
+
+export interface AdvanceResult { seconds: number; settled: boolean; unchanged: boolean; screen: ScreenImage; text: string }
 
 export interface DiskInfo { name: string; kind: 'fdd' | 'hdd'; bytes: number; hasSaves: boolean; drives: DriveId[] }
 
@@ -28,6 +30,8 @@ export interface Backend {
   /** Sends input, waits until the guest got it, then lets waitSeconds pass. */
   input(op: InputOp, waitSeconds: number): Promise<void>;
   run(opts: RunOptions): Promise<RunResult>;
+  /** Presses a key repeatedly, letting the screen settle after each press. */
+  advance(opts: AdvanceOptions): Promise<AdvanceResult[]>;
   listDisks(): Promise<DiskInfo[]>;
   insertDisk(drive: DriveId, name: string): Promise<{ name: string; kind: 'fdd' | 'hdd'; hasSaves: boolean }>;
   ejectDisk(drive: DriveId): Promise<void>;

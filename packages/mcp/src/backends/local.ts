@@ -1,4 +1,4 @@
-import { AgentOps, steppedClock, secondsToFrames, type MachineConfig, type RunOptions } from '@pc98-web/core';
+import { AgentOps, steppedClock, secondsToFrames, type AdvanceOptions, type MachineConfig, type RunOptions } from '@pc98-web/core';
 import type { Session } from '../session.js';
 import type { Backend, DriveId, InputOp } from './types.js';
 
@@ -32,6 +32,16 @@ export class LocalBackend implements Backend {
   }
 
   async run(opts: RunOptions) { return this.ops.run(opts); }
+
+  async advance(opts: AdvanceOptions) {
+    return (await this.ops.advance(opts)).map((st) => ({
+      seconds: st.seconds,
+      settled: st.settled,
+      unchanged: st.unchanged,
+      text: st.text,
+      screen: { width: st.screen.width, height: st.screen.height, rgba: new Uint8Array(st.screen.rgba.buffer, st.screen.rgba.byteOffset, st.screen.rgba.byteLength) },
+    }));
+  }
 
   async listDisks() {
     const mounted = this.session.mountedDisks();

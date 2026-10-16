@@ -124,6 +124,14 @@ export class AgentBridge {
       }
       case 'run':
         return this.ops.run(p);
+      case 'advance':
+        return (await this.ops.advance(p)).map((st) => ({
+          seconds: st.seconds,
+          settled: st.settled,
+          unchanged: st.unchanged,
+          text: st.text,
+          screen: { width: st.screen.width, height: st.screen.height, rgba: b64(new Uint8Array(st.screen.rgba.buffer, st.screen.rgba.byteOffset, st.screen.rgba.byteLength)) },
+        }));
       case 'listDisks': {
         const mounted = [...m.mounted].map(([slot, id]) => [DRIVE_OF[slot], id] as const);
         return (await m.storage.listDisks()).map((d) => ({

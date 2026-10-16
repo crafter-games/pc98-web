@@ -39,3 +39,27 @@ void sysmng_update(UINT update)
 void sysmng_cpureset(void)
 {
 }
+
+static UINT32 s_disk_activity;
+
+void sysmng_fddaccess(UINT8 drv)
+{
+	(void)drv;
+	s_disk_activity++;
+}
+
+void sysmng_hddaccess(UINT8 drv)
+{
+	(void)drv;
+	s_disk_activity++;
+}
+
+/**
+ * Disk accesses (sectors read or written) since power-on. Agents use it to
+ * tell a quiet loading screen from one that is really waiting for input.
+ */
+EMSCRIPTEN_KEEPALIVE
+UINT32 np2w_disk_activity(void)
+{
+	return s_disk_activity;
+}

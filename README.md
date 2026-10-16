@@ -78,8 +78,11 @@ message also includes a second link to a copy of the app served by
 `pc98-mcp` itself on the bridge port, which needs no permission but has its own
 (separate) browser storage.
 
-Tools: `screenshot`, `read_text`, `press_key`, `type_text`, `mouse`, `run`
-(for N seconds, `until_text`, or `until_stable_seconds`), `list_disks`,
+Tools: `screenshot`, `read_text`, `advance` (read a visual novel page by
+page: press, wait until the screen settles, one screenshot per page),
+`press_key`, `type_text`, `mouse`, `run` (for N seconds, `until_text`, or
+`until_stable_seconds`; blinking icons count as stable, disk loading does
+not), `list_disks`,
 `insert_disk`, `eject_disk`, `discard_disk_saves`, `reset`, `power_on`,
 `save_state`, `load_state`, `list_states`, `status`, `read_memory`,
 `write_memory`, `record_audio`, `pair_browser`, `detach_browser`.

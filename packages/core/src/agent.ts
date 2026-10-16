@@ -36,13 +36,61 @@ export interface RunOptions {
   untilStableSeconds?: number;
 }
 
+/**
+ * A screen counts as stable while it only alternates between at most two
+ * exact pictures: a blinking cursor or "waiting for input" icon flips between
+ * them. Text being typed out or a counter going up produces a new
+ * picture every time, and any disk access means the guest is still loading;
+ * both restart the quiet period.
+ */
+const STABLE_MAX_PICTURES = 2;
+
+/** Pixels a press must change to count as having done something (more than a blinking icon). */
+export const DEFAULT_STABLE_TOLERANCE = 600;
+
+function hashRgba(rgba: Uint8ClampedArray): number {
+  const w = new Uint32Array(rgba.buffer, rgba.byteOffset, rgba.byteLength >> 2);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < w.length; i++) h = Math.imul(h ^ w[i], 0x01000193);
+  return h >>> 0;
+}
+
+export interface AdvanceOptions {
+  /** Key to press. Default RETURN. */
+  key?: string;
+  /** How many times. Default 1. */
+  presses?: number;
+  /** After each press, wait until the screen settles, at most this long. Default 5. */
+  maxWaitSeconds?: number;
+  /** The screen must stay settled this long. Default 0.4. */
+  settleSeconds?: number;
+}
+
+export interface AdvanceStep {
+  /** Seconds from the press until the screen settled (or maxWaitSeconds). */
+  seconds: number;
+  settled: boolean;
+  /** The screen after this press settled. */
+  screen: { width: number; height: number; rgba: Uint8ClampedArray };
+  text: string;
+  /** The press changed nothing on screen (e.g. a menu waiting for arrow keys); advancing stopped. */
+  unchanged: boolean;
+}
+
 export interface RunResult {
   outcome: 'ran' | 'text-matched' | 'stable' | 'timeout' | 'powered-off';
   /** Emulated seconds that passed. */
   seconds: number;
 }
 
-export interface KeyOptions { shift?: boolean; ctrl?: boolean; grph?: boolean; times?: number }
+export interface KeyOptions {
+  shift?: boolean;
+  ctrl?: boolean;
+  grph?: boolean;
+  times?: number;
+  /** Pause between repeated presses, so games that animate text see each one. Default 0.3. */
+  intervalSeconds?: number;
+}
 
 export interface MouseOptions {
   dx?: number;
@@ -64,17 +112,6 @@ export class AgentOps {
     return this.pc().textScreen().replace(/\n+$/, '');
   }
 
-  /** FNV-1a over the visible picture, to detect when it stops changing. */
-  screenHash(): number {
-    const { rgba } = this.pc().screen();
-    let h = 0x811c9dc5;
-    for (let i = 0; i < rgba.length; i += 4) {
-      h ^= rgba[i] | (rgba[i + 1] << 8) | (rgba[i + 2] << 16);
-      h = Math.imul(h, 0x01000193);
-    }
-    return h >>> 0;
-  }
-
   /** Waits until queued input has reached the guest, then lets `seconds` pass. */
   async settle(seconds: number): Promise<void> {
     let guard = secondsToFrames(30);
@@ -87,7 +124,11 @@ export class AgentOps {
   pressKey(key: string, opts: KeyOptions = {}): void {
     const code = keyCode(key);
     if (code === undefined) throw new Error(`Unknown key "${key}"`);
-    for (let i = 0; i < (opts.times ?? 1); i++) this.pc().pressKey(code, opts);
+    const times = opts.times ?? 1;
+    for (let i = 0; i < times; i++) {
+      this.pc().pressKey(code, opts);
+      if (i < times - 1) this.pc().queueGap(secondsToFrames(opts.intervalSeconds ?? 0.3));
+    }
   }
 
   typeText(text: string): void {
@@ -134,19 +175,54 @@ export class AgentOps {
     // Check every few frames: cheap enough headless, and in real time the
     // page only renders once per animation frame anyway.
     const step = 4;
-    let lastHash = -1;
+    let seen = new Set<number>([hashRgba(pc.screen().rgba)]);
     let sameFor = 0;
+    let disk = pc.diskActivity;
     for (let ran = 0; ran < maxFrames; ran += step) {
       if (!(await this.clock.advance(Math.min(step, maxFrames - ran)))) return done('powered-off');
       if (re && re.test(this.pc().textScreen())) return done('text-matched');
       if (stableFrames) {
-        const h = this.screenHash();
-        sameFor = h === lastHash ? sameFor + step : 0;
-        lastHash = h;
+        const h = hashRgba(this.pc().screen().rgba);
+        const nowDisk = this.pc().diskActivity;
+        const loading = nowDisk !== disk;
+        disk = nowDisk;
+        if (loading) {
+          seen = new Set([h]);
+          sameFor = 0;
+        } else if (seen.has(h) || seen.size < STABLE_MAX_PICTURES) {
+          seen.add(h);
+          sameFor += step;
+        } else {
+          seen = new Set([h]);
+          sameFor = 0;
+        }
         if (sameFor >= stableFrames) return done('stable');
       }
     }
     return done('timeout');
+  }
+
+  /**
+   * Presses a key repeatedly the way a reader advances a visual novel: one
+   * press, wait for the screen to settle (ignoring blinking icons), capture,
+   * repeat. Nothing drawn between presses is lost.
+   */
+  async advance(opts: AdvanceOptions = {}): Promise<AdvanceStep[]> {
+    const steps: AdvanceStep[] = [];
+    const key = opts.key ?? 'RETURN';
+    const settle = opts.settleSeconds ?? 0.4;
+    for (let i = 0; i < (opts.presses ?? 1); i++) {
+      const before = this.pc().screen().rgba;
+      this.pressKey(key);
+      await this.settle(0);
+      const r = await this.run({ seconds: opts.maxWaitSeconds ?? 5, untilStableSeconds: settle });
+      if (r.outcome === 'powered-off') break;
+      const screen = this.pc().screen();
+      const unchanged = changedPixels(before, screen.rgba) <= DEFAULT_STABLE_TOLERANCE;
+      steps.push({ seconds: r.seconds, settled: r.outcome === 'stable', screen, text: this.readText(), unchanged });
+      if (unchanged) break;
+    }
+    return steps;
   }
 
   /** Runs `seconds` and returns the PCM produced. Headless only: in a page the sound goes to the speakers. */
@@ -167,4 +243,14 @@ export class AgentOps {
     for (const c of chunks) { out.set(c, o); o += c.length; }
     return out;
   }
+}
+
+/** Number of pixels whose RGB differs between two same-sized RGBA frames. */
+export function changedPixels(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
+  if (a.length !== b.length) return Number.MAX_SAFE_INTEGER;
+  const wa = new Uint32Array(a.buffer, a.byteOffset, a.byteLength >> 2);
+  const wb = new Uint32Array(b.buffer, b.byteOffset, b.byteLength >> 2);
+  let n = 0;
+  for (let i = 0; i < wa.length; i++) if (wa[i] !== wb[i]) n++;
+  return n;
 }

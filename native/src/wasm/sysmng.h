@@ -30,8 +30,9 @@ extern "C" {
 
 void sysmng_update(UINT update);
 void sysmng_cpureset(void);
-#define	sysmng_fddaccess(a)
-#define	sysmng_hddaccess(a)
+/* Counted so the host can tell when the guest is loading (np2w_disk_activity). */
+void sysmng_fddaccess(UINT8 drv);
+void sysmng_hddaccess(UINT8 drv);
 
 #ifdef __cplusplus
 }

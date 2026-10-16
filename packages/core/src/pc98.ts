@@ -150,6 +150,9 @@ export class PC98 {
   /** Frames executed since power-on. */
   get frames(): number { return this.m._np2w_frames() >>> 0; }
 
+  /** Disk sectors read or written since power-on: changes while the guest is loading. */
+  get diskActivity(): number { return this.m._np2w_disk_activity() >>> 0; }
+
   /** Emulated milliseconds since power-on. */
   get elapsedMs(): number { return this.m._np2w_elapsed_ms_f(); }
 
@@ -263,6 +266,11 @@ export class PC98 {
       if (!stroke) throw new Error(`Cannot type ${JSON.stringify(ch)} on the PC-98 keyboard`);
       this.pressKey(stroke.code, { shift: stroke.shift, holdFrames: opts.holdFrames });
     }
+  }
+
+  /** Leaves `frames` frames with no input after everything already queued. */
+  queueGap(frames: number): void {
+    this.schedule(this.lastQueuedFrameOffset() + frames, () => {});
   }
 
   private lastQueuedFrameOffset(): number {
